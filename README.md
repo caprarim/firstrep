@@ -15,7 +15,9 @@ No account, no login, no network calls. It's a reference app — it opens and wo
 
 ## Install
 
-Grab [`release/firstrep.apk`](release/firstrep.apk) and sideload it on any Android device (you'll need to allow install from unknown sources).
+Grab [`release/firstrep.apk`](release/firstrep.apk) and sideload it (you'll need to allow install from unknown sources).
+
+Built for `arm64-v8a`, which covers every Android phone from roughly 2016 onward — but not x86 emulators. For a universal build, set `reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64` in `android/gradle.properties` and rebuild. It's signed with the default debug keystore, which is fine for sideloading but would need a real one for the Play Store.
 
 ## Stack
 
