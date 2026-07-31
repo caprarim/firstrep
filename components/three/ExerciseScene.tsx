@@ -161,10 +161,17 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
       frame();
 
       teardown.current = () => {
+        if (disposed) return;
         disposed = true;
         cancelAnimationFrame(raf);
-        disposeTree(scene);
-        renderer.dispose();
+        // The GL context may already be gone if the view was torn down first,
+        // in which case disposal is a no-op we should not crash on.
+        try {
+          disposeTree(scene);
+          renderer.dispose();
+        } catch {
+          /* context already destroyed */
+        }
       };
     },
     [rig]

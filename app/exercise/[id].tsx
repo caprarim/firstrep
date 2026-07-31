@@ -168,16 +168,14 @@ export default function ExerciseDetail() {
           </View>
         ) : null}
 
-        <View className="mt-4 flex-row gap-3">
-          <View className="flex-1 gap-1 rounded-xl border border-border bg-card p-3.5">
-            <View className="flex-row items-center gap-1.5">
-              <Icon as={Wind} size={13} className="text-primary" />
-              <Text className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Breathing
-              </Text>
-            </View>
-            <Text className="text-sm leading-5">{exercise.breathing}</Text>
+        <View className="mt-4 gap-1 rounded-xl border border-border bg-card p-3.5">
+          <View className="flex-row items-center gap-1.5">
+            <Icon as={Wind} size={13} className="text-primary" />
+            <Text className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Breathing
+            </Text>
           </View>
+          <Text className="text-sm leading-5">{exercise.breathing}</Text>
         </View>
 
         <View className="mt-3 gap-1 rounded-xl border border-primary/30 bg-primary/10 p-3.5">
