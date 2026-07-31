@@ -7,7 +7,7 @@ Walking into a gym for the first time is overwhelming. There are forty machines,
 ## What it does
 
 - **3D animated demonstrations.** Every exercise renders a rigged humanoid figure performing the movement on a model of the actual machine, at a realistic lifting tempo — quicker on the lift, slower on the lower, with a squeeze at the top. Drag to orbit the camera, pause it, or slow it down.
-- **Filter by muscle.** Chest, back, shoulders, biceps, triceps, forearms, core, quads, hamstrings, glutes, calves. Filters stack, and there's a second filter for equipment type (machine / cable / free weight / bodyweight).
+- **Filter by muscle.** 29 exercises across chest, back, shoulders, biceps, triceps, forearms, core, quads, hamstrings, glutes and calves. Filters stack, and there's a second filter for equipment type (machine / cable / free weight / bodyweight).
 - **Real coaching per exercise.** How to set the machine up, how to do the rep, form cues, the common mistakes beginners make, breathing, and a sensible starting weight.
 - **A Basics tab** covering the unwritten rules, what "3x10" means, how to pick a weight, and a three-day first week to follow.
 
@@ -29,7 +29,16 @@ Grab [`release/firstrep.apk`](release/firstrep.apk) and sideload it on any Andro
 
 There are no downloaded model or animation assets. The figure is a hand-built forward-kinematic skeleton (`components/three/rig.ts`) — hips → spine → chest → limbs, where rotating a joint swings everything below it. Each exercise defines a start pose and a contracted end pose, and the renderer blends between them on an eased rep curve.
 
-Machines are composed from primitives in `components/three/parts.ts` (frame tubes, upholstered pads, weight stacks, pulleys, cables). Rather than solving inverse kinematics, handles are snapped to the figure's hands each frame and cables are re-aimed to follow — so the bar always sits in the grip and the weight stack visibly moves with the rep.
+Machines are composed from primitives in `components/three/parts.ts` (frame tubes, upholstered pads, weight stacks, pulleys, cables). Handles are snapped to the figure's hands each frame and cables re-aimed to follow, so the bar always sits in the grip and the weight stack visibly moves with the rep.
+
+Legs are the one place that does use IK: poses are authored as "hips here, feet planted there" and a two-link solver works out the joint angles. Without it, any pose carrying a torso lean or a hip drop — squats, rows, preacher curls — rotates the legs along with the torso and drives the feet through the floor.
+
+`scripts/verify-poses.ts` builds every scene headlessly and asserts nothing clips the floor, collapses, or goes NaN:
+
+```bash
+npx esbuild scripts/verify-poses.ts --bundle --platform=node --format=cjs \
+  --outfile=.verify.cjs --external:three && node .verify.cjs
+```
 
 ## Running it
 

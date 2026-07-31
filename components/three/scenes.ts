@@ -15,7 +15,17 @@ import {
   tube,
   weightStack,
 } from './parts';
-import { HIP_HEIGHT, HIP_SEATED, type Humanoid, type Pose, type Vec3 } from './rig';
+import {
+  HIP_DROP,
+  HIP_HEIGHT,
+  HIP_SEATED,
+  SHIN,
+  SOLE,
+  THIGH,
+  type Humanoid,
+  type Pose,
+  type Vec3,
+} from './rig';
 
 export type SceneBuild = {
   group: THREE.Group;
@@ -91,28 +101,86 @@ function seatUnit(parent: THREE.Object3D, z = 0, backAngle = -0.12, withBack = t
   return g;
 }
 
-/** Seated baseline: thighs forward and just below level, shins vertical. */
-function seatedLegs(): Partial<Pose['joints']> {
+/**
+ * Two-link IK for a leg.
+ *
+ * Poses are authored as "the hips are here, the feet are planted there", and
+ * this works out the joint angles. Doing it analytically matters because the
+ * root group carries the torso lean — without solving for it, any pose with a
+ * forward lean or a hip drop rotates the legs too and drives the feet through
+ * the floor.
+ *
+ * `rootY`/`rootZ` locate the root origin; `footZ` is where the foot is planted;
+ * `rootRot` is the torso lean that must be cancelled out of the hip angle.
+ */
+function legIK(opts: {
+  rootY: number;
+  rootZ?: number;
+  rootRot?: number;
+  footZ: number;
+  footY?: number;
+}) {
+  const { rootY, rootZ = 0, rootRot = 0, footZ, footY = SOLE } = opts;
+  const hipY = rootY - HIP_DROP;
+
+  const dy = footY - hipY; // negative: the foot is below the hip
+  const dz = footZ - rootZ;
+
+  const reach = Math.hypot(dy, dz);
+  const d = Math.min(THIGH + SHIN - 0.012, Math.max(Math.abs(THIGH - SHIN) + 0.012, reach));
+
+  // Our convention: a limb points along -Y, and a negative X rotation swings
+  // it toward +Z, so the straight-line angle to the target is -atan2(dz, -dy).
+  const line = -Math.atan2(dz, -dy);
+  const alpha = Math.acos(
+    Math.min(1, Math.max(-1, (THIGH * THIGH + d * d - SHIN * SHIN) / (2 * THIGH * d)))
+  );
+  const beta = Math.acos(
+    Math.min(1, Math.max(-1, (THIGH * THIGH + SHIN * SHIN - d * d) / (2 * THIGH * SHIN)))
+  );
+
+  const thigh = line - alpha; // world angle of the femur (knee leads forward)
+  const shin = thigh + (Math.PI - beta);
+
+  return { hip: thigh - rootRot, knee: shin - thigh, ankle: -shin };
+}
+
+/** Expands an IK result into a left/right joint set with a touch of stance splay. */
+function legPose(
+  ik: ReturnType<typeof legIK>,
+  splay = 0.05
+): Partial<Pose['joints']> {
   return {
-    hipL: [-1.45, 0.04, 0.04],
-    hipR: [-1.45, -0.04, -0.04],
-    kneeL: [1.45, 0, 0],
-    kneeR: [1.45, 0, 0],
-    ankleL: [0.12, 0, 0],
-    ankleR: [0.12, 0, 0],
+    hipL: [ik.hip, splay, splay * 0.7],
+    hipR: [ik.hip, -splay, -splay * 0.7],
+    kneeL: [ik.knee, 0, 0],
+    kneeR: [ik.knee, 0, 0],
+    ankleL: [ik.ankle, 0, 0],
+    ankleR: [ik.ankle, 0, 0],
   };
 }
 
-/** Standing baseline with a stable, slightly staggered stance. */
-function standingLegs(bend = 0.1): Partial<Pose['joints']> {
-  return {
-    hipL: [-bend, 0.05, 0.03],
-    hipR: [-bend, -0.05, -0.03],
-    kneeL: [bend * 1.6, 0, 0],
-    kneeR: [bend * 1.6, 0, 0],
-    ankleL: [-bend * 0.6, 0, 0],
-    ankleR: [-bend * 0.6, 0, 0],
-  };
+type LegOpts = {
+  /** Torso lean carried on the root, which the hip angle must cancel. */
+  lean?: number;
+  rootY?: number;
+  rootZ?: number;
+  footZ?: number;
+  /** Raise this when the feet rest on a platform rather than the floor. */
+  footY?: number;
+  splay?: number;
+};
+
+/** Seated baseline: feet planted in front of the seat. */
+function seatedLegs(o: LegOpts = {}) {
+  const { lean = 0, rootY = HIP_SEATED, rootZ = 0, footZ = 0.46, footY = SOLE, splay = 0.05 } = o;
+  return legPose(legIK({ rootY, rootZ, rootRot: lean, footZ, footY }), splay);
+}
+
+/** Standing baseline; `lean` is the torso hinge the legs must cancel. */
+function standingLegs(o: LegOpts = {}) {
+  const { lean = 0, rootY = HIP_HEIGHT, rootZ = 0, footZ = 0, footY = SOLE, splay = 0.05 } = o;
+  return legPose(legIK({ rootY, rootZ, rootRot: lean, footZ, footY }), splay);
 }
 
 function baseScene() {
@@ -210,15 +278,15 @@ function seatedRow(rig: Humanoid): SceneBuild {
   const m = new THREE.Group();
 
   // long rail running away from the lifter
-  box(m, [0.4, 0.1, 2.3], [0, 0.06, -0.75], MATS.frameDark);
-  tube(m, [0, 0.5, -1.72], [0, 1.05, -1.72], 0.05);
-  box(m, [0.62, 0.5, 0.12], [0, 0.36, -1.86], MATS.frame); // foot plate
+  box(m, [0.4, 0.1, 1.7], [0, 0.06, -0.55], MATS.frameDark);
+  tube(m, [0, 0.4, -0.82], [0, 1.05, -0.9], 0.05);
+  box(m, [0.62, 0.34, 0.14], [0, 0.17, -0.78], MATS.frame); // foot plate
   seatUnit(m, 0.05, -0.06, false);
 
-  const front = pulley(m, [0, 0.62, -1.66], 0.05);
-  const stack = weightStack(m, [0, 0.06, -2.05], 11, 4);
-  const stackTop = pulley(m, [0, 1.08, -2.05], 0.05);
-  tube(m, [0, 1.05, -1.72], [0, 1.05, -2.05], 0.04);
+  const front = pulley(m, [0, 0.6, -0.84], 0.05);
+  const stack = weightStack(m, [0, 0.06, -1.24], 11, 4);
+  const stackTop = pulley(m, [0, 1.08, -1.24], 0.05);
+  tube(m, [0, 1.05, -0.9], [0, 1.05, -1.24], 0.04);
 
   const handle = new THREE.Group();
   // V-handle: two grips angled toward each other
@@ -232,19 +300,16 @@ function seatedRow(rig: Humanoid): SceneBuild {
   contactShadow(g, 0.75);
   g.add(rig.root);
 
-  const legs = {
-    hipL: [-1.32, 0.06, 0.04],
-    hipR: [-1.32, -0.06, -0.04],
-    kneeL: [1.02, 0, 0],
-    kneeR: [1.02, 0, 0],
-    ankleL: [-0.35, 0, 0],
-    ankleR: [-0.35, 0, 0],
-  } as Partial<Pose['joints']>;
+  // Feet are up on the machine's platform, not the floor.
+  const PLATE_Y = 0.34;
+  const legOpts = { rootY: HIP_SEATED + 0.02, rootZ: 0.05, footZ: -0.62, footY: PLATE_Y + SOLE };
+  const legsStart = seatedLegs({ ...legOpts, lean: 0.34 });
+  const legsEnd = seatedLegs({ ...legOpts, lean: -0.06 });
 
   const start: Pose = {
     root: { pos: [0, HIP_SEATED + 0.02, 0.05], rot: [0.34, 0, 0] },
     joints: {
-      ...legs,
+      ...legsStart,
       spine: [0.06, 0, 0],
       chest: [0.06, 0, 0],
       neck: [-0.24, 0, 0],
@@ -258,7 +323,7 @@ function seatedRow(rig: Humanoid): SceneBuild {
   const end: Pose = {
     root: { pos: [0, HIP_SEATED + 0.02, 0.05], rot: [-0.06, 0, 0] },
     joints: {
-      ...legs,
+      ...legsEnd,
       spine: [-0.05, 0, 0],
       chest: [-0.06, 0, 0],
       neck: [0.02, 0, 0],
@@ -316,12 +381,7 @@ function chestSupportedRow(rig: Humanoid): SceneBuild {
   contactShadow(g, 0.7);
   g.add(rig.root);
 
-  const legs = {
-    hipL: [-1.4, 0.08, 0.05],
-    hipR: [-1.4, -0.08, -0.05],
-    kneeL: [1.5, 0, 0],
-    kneeR: [1.5, 0, 0],
-  } as Partial<Pose['joints']>;
+  const legs = seatedLegs({ lean: 0.3, rootZ: 0.16, footZ: 0.6 });
 
   const start: Pose = {
     root: { pos: [0, HIP_SEATED, 0.16], rot: [0.3, 0, 0] },
@@ -764,7 +824,7 @@ function preacherCurl(rig: Humanoid): SceneBuild {
   contactShadow(g, 0.7);
   g.add(rig.root);
 
-  const legs = seatedLegs();
+  const legs = seatedLegs({ lean: 0.32, rootZ: -0.16, footZ: 0.28 });
   const upperArm = { shoulderL: [-0.96, 0, 0.2], shoulderR: [-0.96, 0, -0.2] } as Partial<
     Pose['joints']
   >;
@@ -1064,12 +1124,8 @@ function abCrunch(rig: Humanoid): SceneBuild {
   contactShadow(g, 0.7);
   g.add(rig.root);
 
-  const legs = {
-    hipL: [-1.44, 0.06, 0.04],
-    hipR: [-1.44, -0.06, -0.04],
-    kneeL: [1.85, 0, 0],
-    kneeR: [1.85, 0, 0],
-  } as Partial<Pose['joints']>;
+  const legsStart = seatedLegs({ lean: -0.1, footZ: 0.34, footY: 0.24 });
+  const legsEnd = seatedLegs({ lean: 0.42, footZ: 0.34, footY: 0.24 });
 
   return {
     group: g,
@@ -1077,7 +1133,7 @@ function abCrunch(rig: Humanoid): SceneBuild {
     start: {
       root: { pos: [0, HIP_SEATED, 0], rot: [-0.1, 0, 0] },
       joints: {
-        ...legs,
+        ...legsStart,
         spine: [-0.05, 0, 0],
         chest: [-0.05, 0, 0],
         shoulderL: [-0.5, 0, 0.5],
@@ -1089,7 +1145,7 @@ function abCrunch(rig: Humanoid): SceneBuild {
     end: {
       root: { pos: [0, HIP_SEATED, 0], rot: [0.42, 0, 0] },
       joints: {
-        ...legs,
+        ...legsEnd,
         spine: [0.3, 0, 0],
         chest: [0.3, 0, 0],
         neck: [0.24, 0, 0],
@@ -1140,6 +1196,22 @@ function hipAbduction(rig: Humanoid): SceneBuild {
     elbowR: [-1.1, 0, 0],
   } as Partial<Pose['joints']>;
 
+  /** Seated with the feet on the plates, knees swung out by `spread` radians. */
+  const abdKnees = (spread: number): Partial<Pose['joints']> => {
+    const base = seatedLegs({ lean: -0.08, footZ: 0.42, footY: 0.16, splay: 0 });
+    const hip = (base.hipL as Vec3)[0];
+    const knee = (base.kneeL as Vec3)[0];
+    const ankle = (base.ankleL as Vec3)[0];
+    return {
+      hipL: [hip, 0, spread],
+      hipR: [hip, 0, -spread],
+      kneeL: [knee, 0, 0],
+      kneeR: [knee, 0, 0],
+      ankleL: [ankle, 0, 0],
+      ankleR: [ankle, 0, 0],
+    };
+  };
+
   return {
     group: g,
     camera: { pos: [1.1, 1.6, 3.1], target: [0, 0.85, 0.1] },
@@ -1147,20 +1219,14 @@ function hipAbduction(rig: Humanoid): SceneBuild {
       root: { pos: [0, HIP_SEATED, 0], rot: [-0.08, 0, 0] },
       joints: {
         ...upper,
-        hipL: [-1.46, 0, -0.04],
-        hipR: [-1.46, 0, 0.04],
-        kneeL: [1.4, 0, 0],
-        kneeR: [1.4, 0, 0],
+        ...abdKnees(0.0),
       },
     },
     end: {
       root: { pos: [0, HIP_SEATED, 0], rot: [-0.08, 0, 0] },
       joints: {
         ...upper,
-        hipL: [-1.46, 0, 0.62],
-        hipR: [-1.46, 0, -0.62],
-        kneeL: [1.4, 0, 0],
-        kneeR: [1.4, 0, 0],
+        ...abdKnees(0.62),
       },
     },
     update(t, r) {
@@ -1248,7 +1314,7 @@ function cableColumn(rig: Humanoid, variant?: string): SceneBuild {
 }
 
 function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBuild['camera'] } {
-  const stand = standingLegs(0.12);
+  const stand = standingLegs({ lean: 0.1, rootZ: 0.15, footZ: 0.16 });
   const rootStand = { pos: [0, HIP_HEIGHT, 0.15] as Vec3, rot: [0, 0, 0] as Vec3 };
 
   switch (variant) {
@@ -1283,7 +1349,7 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
         start: {
           root: { pos: [0, HIP_HEIGHT - 0.03, 0.3], rot: [0.24, 0, 0] },
           joints: {
-            ...standingLegs(0.16),
+            ...standingLegs({ lean: 0.24, rootY: HIP_HEIGHT - 0.03, rootZ: 0.3, footZ: 0.32 }),
             shoulderL: [-2.05, 0, 0.16],
             shoulderR: [-2.05, 0, -0.16],
             elbowL: [-0.12, 0, 0],
@@ -1293,7 +1359,7 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
         end: {
           root: { pos: [0, HIP_HEIGHT - 0.03, 0.3], rot: [0.3, 0, 0] },
           joints: {
-            ...standingLegs(0.16),
+            ...standingLegs({ lean: 0.3, rootY: HIP_HEIGHT - 0.03, rootZ: 0.3, footZ: 0.32 }),
             shoulderL: [-0.16, 0, 0.14],
             shoulderR: [-0.16, 0, -0.14],
             elbowL: [-0.1, 0, 0],
@@ -1333,7 +1399,7 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
         start: {
           root: { pos: [0, HIP_HEIGHT, 0.55], rot: [0.04, 0, 0] },
           joints: {
-            ...standingLegs(0.14),
+            ...standingLegs({ lean: 0.04, rootZ: 0.55, footZ: 0.56 }),
             shoulderL: [-2.75, 0, 0.24],
             shoulderR: [-2.75, 0, -0.24],
             elbowL: [-2.35, 0, 0],
@@ -1343,7 +1409,7 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
         end: {
           root: { pos: [0, HIP_HEIGHT, 0.55], rot: [0.04, 0, 0] },
           joints: {
-            ...standingLegs(0.14),
+            ...standingLegs({ lean: 0.04, rootZ: 0.55, footZ: 0.56 }),
             shoulderL: [-2.86, 0, 0.2],
             shoulderR: [-2.86, 0, -0.2],
             elbowL: [-0.12, 0, 0],
@@ -1358,10 +1424,7 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
         start: {
           root: { pos: [0, HIP_SEATED, 0.1], rot: [0.36, 0, 0] },
           joints: {
-            hipL: [-1.42, 0.06, 0.04],
-            hipR: [-1.42, -0.06, -0.04],
-            kneeL: [1.5, 0, 0],
-            kneeR: [1.5, 0, 0],
+            ...seatedLegs({ lean: 0.36, rootZ: 0.1, footZ: 0.52 }),
             neck: [-0.3, 0, 0],
             shoulderL: [-0.72, 0, 0.16],
             shoulderR: [-0.72, 0, -0.16],
@@ -1374,10 +1437,7 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
         end: {
           root: { pos: [0, HIP_SEATED, 0.1], rot: [0.36, 0, 0] },
           joints: {
-            hipL: [-1.42, 0.06, 0.04],
-            hipR: [-1.42, -0.06, -0.04],
-            kneeL: [1.5, 0, 0],
-            kneeR: [1.5, 0, 0],
+            ...seatedLegs({ lean: 0.36, rootZ: 0.1, footZ: 0.52 }),
             neck: [-0.3, 0, 0],
             shoulderL: [-0.72, 0, 0.16],
             shoulderR: [-0.72, 0, -0.16],
@@ -1395,7 +1455,7 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
         start: {
           root: { pos: [0, HIP_HEIGHT - 0.04, 0.2], rot: [0, 0.5, 0.08] },
           joints: {
-            ...standingLegs(0.2),
+            ...standingLegs({ lean: 0, rootY: HIP_HEIGHT - 0.04, rootZ: 0.2, footZ: 0.2 }),
             spine: [0, 0.24, 0],
             chest: [0, 0.2, 0],
             shoulderL: [-2.5, 0, 0.3],
@@ -1407,7 +1467,7 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
         end: {
           root: { pos: [0, HIP_HEIGHT - 0.12, 0.2], rot: [0.12, -0.5, -0.08] },
           joints: {
-            ...standingLegs(0.34),
+            ...standingLegs({ lean: 0.12, rootY: HIP_HEIGHT - 0.12, rootZ: 0.2, footZ: 0.2 }),
             spine: [0.1, -0.26, 0],
             chest: [0.1, -0.22, 0],
             shoulderL: [-0.32, 0, 0.26],
@@ -1515,7 +1575,7 @@ function flatBench(rig: Humanoid, variant?: string): SceneBuild {
   }
 
   if (variant === 'farmers-carry') {
-    const walk = standingLegs(0.06);
+    const walk = standingLegs({ lean: 0.02 });
     return {
       group: g,
       camera: { pos: [2.2, 1.6, 2.6], target: [0, 1.05, 0] },
@@ -1561,7 +1621,7 @@ function flatBench(rig: Humanoid, variant?: string): SceneBuild {
   }
 
   // hammer curl, standing, alternating arms
-  const stand = standingLegs(0.08);
+  const stand = standingLegs({ lean: 0 });
   return {
     group: g,
     camera: { pos: [2.0, 1.5, 2.4], target: [0, 1.05, 0] },
@@ -1626,12 +1686,7 @@ function smithMachine(rig: Humanoid, variant?: string): SceneBuild {
 
   if (variant === 'row') {
     const hinged = {
-      hipL: [-0.72, 0.06, 0.04],
-      hipR: [-0.72, -0.06, -0.04],
-      kneeL: [0.42, 0, 0],
-      kneeR: [0.42, 0, 0],
-      ankleL: [-0.2, 0, 0],
-      ankleR: [-0.2, 0, 0],
+      ...standingLegs({ lean: 0.78, rootY: HIP_HEIGHT - 0.06, rootZ: -0.05, footZ: 0.06 }),
       neck: [-0.5, 0, 0],
     } as Partial<Pose['joints']>;
 
@@ -1672,12 +1727,7 @@ function smithMachine(rig: Humanoid, variant?: string): SceneBuild {
     start: {
       root: { pos: [0, HIP_HEIGHT, -0.1], rot: [0.04, 0, 0] },
       joints: {
-        hipL: [-0.06, 0.07, 0.05],
-        hipR: [-0.06, -0.07, -0.05],
-        kneeL: [0.1, 0, 0],
-        kneeR: [0.1, 0, 0],
-        ankleL: [-0.05, 0, 0],
-        ankleR: [-0.05, 0, 0],
+        ...standingLegs({ lean: 0.04, rootY: HIP_HEIGHT, rootZ: -0.1, footZ: 0, splay: 0.07 }),
         shoulderL: [0.32, 0, 1.45],
         shoulderR: [0.32, 0, -1.45],
         elbowL: [-2.3, 0, 0],
@@ -1685,14 +1735,15 @@ function smithMachine(rig: Humanoid, variant?: string): SceneBuild {
       },
     },
     end: {
-      root: { pos: [0, HIP_HEIGHT - 0.42, -0.02], rot: [0.34, 0, 0] },
+      root: { pos: [0, HIP_HEIGHT - 0.42, -0.34], rot: [0.34, 0, 0] },
       joints: {
-        hipL: [-1.28, 0.11, 0.09],
-        hipR: [-1.28, -0.11, -0.09],
-        kneeL: [1.62, 0, 0],
-        kneeR: [1.62, 0, 0],
-        ankleL: [-0.34, 0, 0],
-        ankleR: [-0.34, 0, 0],
+        ...standingLegs({
+          lean: 0.34,
+          rootY: HIP_HEIGHT - 0.42,
+          rootZ: -0.34,
+          footZ: 0,
+          splay: 0.11,
+        }),
         shoulderL: [0.32, 0, 1.45],
         shoulderR: [0.32, 0, -1.45],
         elbowL: [-2.3, 0, 0],

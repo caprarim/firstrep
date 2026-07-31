@@ -67,7 +67,15 @@ const SEG = {
 export const HIP_HEIGHT = 0.96;
 
 /** Hip-joint height when seated on a standard 0.44 m gym seat. */
-export const HIP_SEATED = 0.55;
+export const HIP_SEATED = 0.575;
+
+/** Segment lengths the IK solver needs. */
+export const THIGH = SEG.thigh;
+export const SHIN = SEG.shin;
+/** The hip joint sits slightly below the root origin. */
+export const HIP_DROP = 0.03;
+/** Ankle height when the sole is flat on the floor. */
+export const SOLE = 0.07;
 
 const PALETTE = {
   skin: 0xe2a77b,
