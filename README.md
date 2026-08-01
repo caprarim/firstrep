@@ -55,6 +55,8 @@ npm run android
 
 To rebuild the APK: `npm run apk` (output lands in `android/app/build/outputs/apk/release/`).
 
+Bump `expo.android.versionCode` in `app.json` for every build you publish. `npm run apk` runs `expo prebuild` first, which regenerates `android/app/build.gradle` from the template — anything you edit there by hand is overwritten, and a build whose `versionCode` is lower than the one already on the phone is refused as a downgrade. Samsung reports that as "package appears to be invalid", which looks like a corrupt file but isn't.
+
 Publish it as a release asset rather than committing it — a binary linked from the file tree can't be downloaded from GitHub's viewer:
 
 ```bash
