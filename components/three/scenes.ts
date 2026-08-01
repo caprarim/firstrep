@@ -11,7 +11,9 @@ import {
   Link,
   MATS,
   pad,
+  panel,
   pulley,
+  rubberFoot,
   tube,
   weightStack,
 } from './parts';
@@ -88,14 +90,14 @@ function toHand(obj: THREE.Object3D, rig: Humanoid, side: 'L' | 'R', drop = 0.07
 function seatUnit(parent: THREE.Object3D, z = 0, backAngle = -0.12, withBack = true) {
   const g = new THREE.Group();
   g.position.z = z;
-  // seat pan
-  pad(g, [0.42, 0.09, 0.4], [0, SEAT_TOP, 0]);
+  // seat pan, dropped so the cushion's top face lands on SEAT_TOP
+  pad(g, [0.42, 0.09, 0.4], [0, SEAT_TOP - 0.051, 0]);
   // pedestal
   cylinder(g, 0.05, SEAT_TOP - 0.05, [0, (SEAT_TOP - 0.05) / 2, 0], MATS.frame);
-  box(g, [0.44, 0.05, 0.5], [0, 0.03, 0], MATS.frameDark);
+  baseFrame(g, 0.44, 0.5, 0);
   if (withBack) {
     pad(g, [0.4, 0.11, 0.52], [0, SEAT_TOP + 0.3, -0.22], [backAngle, 0, 0]);
-    tube(g, [0, SEAT_TOP, -0.2], [0, SEAT_TOP + 0.58, -0.28], 0.03);
+    tube(g, [0, SEAT_TOP - 0.051, -0.2], [0, SEAT_TOP + 0.58, -0.28], 0.03);
   }
   parent.add(g);
   return g;
@@ -119,8 +121,10 @@ function legIK(opts: {
   rootRot?: number;
   footZ: number;
   footY?: number;
+  /** Foot angle in world space: positive drives the toes down and the heel up. */
+  pitch?: number;
 }) {
-  const { rootY, rootZ = 0, rootRot = 0, footZ, footY = SOLE } = opts;
+  const { rootY, rootZ = 0, rootRot = 0, footZ, footY = SOLE, pitch = 0 } = opts;
   const hipY = rootY - HIP_DROP;
 
   const dy = footY - hipY; // negative: the foot is below the hip
@@ -142,7 +146,24 @@ function legIK(opts: {
   const thigh = line - alpha; // world angle of the femur (knee leads forward)
   const shin = thigh + (Math.PI - beta);
 
-  return { hip: thigh - rootRot, knee: shin - thigh, ankle: -shin };
+  return { hip: thigh - rootRot, knee: shin - thigh, ankle: pitch - shin };
+}
+
+/** Horizontal distance from the ankle joint forward to the ball of the foot. */
+const BALL = 0.105;
+
+/**
+ * Where the ankle ends up when the ball of the foot is pinned to a platform and
+ * the foot rotates through `pitch`. Calf work pivots on the ball, so solving for
+ * the ankle this way is what keeps the shoe on top of the block instead of
+ * sinking through it.
+ */
+function ankleOverBall(ballZ: number, ballY: number, pitch: number) {
+  return {
+    footZ: ballZ + SOLE * Math.sin(pitch) - BALL * Math.cos(pitch),
+    footY: ballY + SOLE * Math.cos(pitch) + BALL * Math.sin(pitch),
+    pitch,
+  };
 }
 
 /** Expands an IK result into a left/right joint set with a touch of stance splay. */
@@ -189,6 +210,35 @@ function baseScene() {
   return group;
 }
 
+/**
+ * The floor frame of a machine, built the way real ones are: two side rails and
+ * a rear crossmember on rubber feet. A solid slab would look the part but the
+ * lifter's shoes plant right where it sits, so the middle has to stay open.
+ */
+function baseFrame(parent: THREE.Object3D, width: number, depth: number, z = 0) {
+  const g = new THREE.Group();
+  g.position.z = z;
+
+  const h = 0.075;
+  const railX = Math.max(0.24, width / 2 - 0.05);
+  const halfD = depth / 2;
+
+  [railX, -railX].forEach((x) => {
+    panel(g, [0.09, h, depth], [x, h / 2, 0], MATS.frameDark);
+    rubberFoot(g, [x, 0, halfD - 0.07]);
+    rubberFoot(g, [x, 0, -halfD + 0.07]);
+  });
+
+  panel(g, [railX * 2 + 0.09, h, 0.11], [0, h / 2, -halfD + 0.055], MATS.frameDark);
+  if (depth > 0.8) {
+    panel(g, [railX * 2 + 0.09, h * 0.8, 0.09], [0, h * 0.4, -halfD + 0.3], MATS.frameDark);
+    panel(g, [0.16, 0.012, 0.06], [0, h + 0.006, halfD - 0.05], MATS.accent);
+  }
+
+  parent.add(g);
+  return g;
+}
+
 // ── machines ────────────────────────────────────────────────────────────
 
 function latPulldown(rig: Humanoid): SceneBuild {
@@ -201,7 +251,7 @@ function latPulldown(rig: Humanoid): SceneBuild {
   tube(machine, [-0.3, 2.16, -0.9], [0.3, 2.16, -0.9], 0.045);
   // overhead arm reaching out over the seat
   tube(machine, [0, 2.14, -0.9], [0, 2.14, 0.14], 0.045);
-  box(machine, [1.0, 0.06, 1.1], [0, 0.03, -0.55], MATS.frameDark);
+  baseFrame(machine, 1.0, 1.1, -0.55);
 
   const top = pulley(machine, [0, 2.06, 0.1]);
   const stackTop = pulley(machine, [0, 2.06, -0.86], 0.05);
@@ -209,7 +259,7 @@ function latPulldown(rig: Humanoid): SceneBuild {
 
   seatUnit(machine, 0, -0.1, true);
   // thigh restraint pad
-  pad(machine, [0.44, 0.1, 0.16], [0, 0.68, 0.26]);
+  pad(machine, [0.44, 0.1, 0.17], [0, 0.688, 0.34]);
   tube(machine, [0.2, SEAT_TOP + 0.02, 0.2], [0.2, 0.68, 0.26], 0.026, MATS.chrome);
   tube(machine, [-0.2, SEAT_TOP + 0.02, 0.2], [-0.2, 0.68, 0.26], 0.026, MATS.chrome);
 
@@ -356,9 +406,9 @@ function chestSupportedRow(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.9, 0.08, 1.2], [0, 0.05, -0.15], MATS.frameDark);
+  baseFrame(m, 0.9, 1.2, -0.15);
   // seat + angled chest pad
-  pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP, 0.16]);
+  pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP - 0.051, 0.16]);
   cylinder(m, 0.05, SEAT_TOP, [0, SEAT_TOP / 2, 0.16], MATS.frame);
   pad(m, [0.42, 0.12, 0.62], [0, 0.98, -0.24], [0.28, 0, 0]);
   tube(m, [0, 0.4, -0.34], [0, 1.2, -0.16], 0.05);
@@ -425,7 +475,7 @@ function assistedPullup(rig: Humanoid, variant?: string): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [1.3, 0.09, 1.1], [0, 0.05, -0.2], MATS.frameDark);
+  baseFrame(m, 1.3, 1.1, -0.2);
   tube(m, [0.52, 0, -0.5], [0.52, 2.34, -0.5], 0.055);
   tube(m, [-0.52, 0, -0.5], [-0.52, 2.34, -0.5], 0.055);
   tube(m, [-0.52, 2.34, -0.5], [0.52, 2.34, -0.5], 0.05);
@@ -449,9 +499,9 @@ function assistedPullup(rig: Humanoid, variant?: string): SceneBuild {
   m.add(dipBars);
 
   // counterweight knee/foot platform
-  const platform = box(m, [0.5, 0.1, 0.34], [0, 0.62, 0.06], MATS.pad);
+  const platform = box(m, [0.5, 0.1, 0.26], [0, 0.622, 0.11], MATS.pad);
   platform.visible = !isDip;
-  const seat = pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP, 0.1]);
+  const seat = pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP - 0.051, 0.1]);
   const seatBack = pad(m, [0.4, 0.1, 0.5], [0, SEAT_TOP + 0.32, -0.14], [-0.12, 0, 0]);
   seat.visible = isDip;
   seatBack.visible = isDip;
@@ -552,7 +602,7 @@ function chestPress(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.95, 0.09, 1.25], [0, 0.05, -0.25], MATS.frameDark);
+  baseFrame(m, 0.95, 1.25, -0.25);
   seatUnit(m, 0.05, -0.16, true);
   tube(m, [0.46, 0.1, -0.5], [0.46, 1.42, -0.34], 0.05);
   tube(m, [-0.46, 0.1, -0.5], [-0.46, 1.42, -0.34], 0.05);
@@ -618,7 +668,7 @@ function pecDeck(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.9, 0.09, 1.2], [0, 0.05, -0.2], MATS.frameDark);
+  baseFrame(m, 0.9, 1.2, -0.2);
   seatUnit(m, 0.05, -0.1, true);
   tube(m, [0, 0.6, -0.42], [0, 1.72, -0.42], 0.055);
   tube(m, [-0.34, 1.68, -0.42], [0.34, 1.68, -0.42], 0.042);
@@ -627,7 +677,7 @@ function pecDeck(rig: Humanoid): SceneBuild {
   const arms: THREE.Group[] = [];
   [1, -1].forEach((s) => {
     const a = new THREE.Group();
-    pad(a, [0.32, 0.1, 0.13], [0, 0.06, 0], [Math.PI / 2, 0, 0]);
+    pad(a, [0.13, 0.1, 0.3], [-s * 0.088, 0.05, 0], [0, 0, Math.PI / 2]);
     cylinder(a, 0.022, 0.34, [0, 0, 0], MATS.chrome);
     m.add(a);
     arms.push(a);
@@ -682,7 +732,7 @@ function shoulderPress(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.9, 0.09, 1.15], [0, 0.05, -0.2], MATS.frameDark);
+  baseFrame(m, 0.9, 1.15, -0.2);
   seatUnit(m, 0.05, -0.06, true);
   tube(m, [0.42, 0.1, -0.42], [0.42, 1.86, -0.32], 0.05);
   tube(m, [-0.42, 0.1, -0.42], [-0.42, 1.86, -0.32], 0.05);
@@ -742,15 +792,15 @@ function lateralRaise(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.9, 0.09, 1.05], [0, 0.05, -0.15], MATS.frameDark);
+  baseFrame(m, 0.9, 1.05, -0.15);
   seatUnit(m, 0.02, -0.05, true);
   tube(m, [0, 0.55, -0.36], [0, 1.34, -0.36], 0.05);
 
   const arms: THREE.Group[] = [];
   [1, -1].forEach((s) => {
     const a = new THREE.Group();
-    pad(a, [0.26, 0.1, 0.12], [0, 0, 0], [0, 0, Math.PI / 2]);
-    cylinder(a, 0.02, 0.2, [0, 0.1, -0.06], MATS.chrome);
+    pad(a, [0.26, 0.1, 0.12], [s * 0.088, 0, 0], [0, 0, Math.PI / 2]);
+    cylinder(a, 0.02, 0.2, [s * 0.088, 0.11, -0.06], MATS.chrome);
     m.add(a);
     arms.push(a);
   });
@@ -791,8 +841,10 @@ function lateralRaise(rig: Humanoid): SceneBuild {
       // pads ride on the outside of the upper arm, at the elbow
       arms[0].position.copy(r.worldOf('elbowL'));
       arms[1].position.copy(r.worldOf('elbowR'));
-      linkage[0].set(new THREE.Vector3(0.06, 1.3, -0.36), arms[0].position);
-      linkage[1].set(new THREE.Vector3(-0.06, 1.3, -0.36), arms[1].position);
+      const padL = arms[0].position.clone().setX(arms[0].position.x + 0.088);
+      const padR = arms[1].position.clone().setX(arms[1].position.x - 0.088);
+      linkage[0].set(new THREE.Vector3(0.14, 1.3, -0.36), padL);
+      linkage[1].set(new THREE.Vector3(-0.14, 1.3, -0.36), padR);
       stack.setLift(t, 0.24);
     },
   };
@@ -802,12 +854,13 @@ function preacherCurl(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.85, 0.09, 1.0], [0, 0.05, -0.1], MATS.frameDark);
-  pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP, -0.16]);
+  baseFrame(m, 0.85, 1.0, -0.1);
+  pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP - 0.051, -0.16]);
   cylinder(m, 0.05, SEAT_TOP, [0, SEAT_TOP / 2, -0.16], MATS.frame);
   // the angled preacher pad
-  pad(m, [0.52, 0.13, 0.5], [0, 0.94, 0.2], [0.62, 0, 0]);
-  tube(m, [0, 0.3, 0.3], [0, 0.9, 0.24], 0.05);
+  pad(m, [0.52, 0.13, 0.46], [0, 0.7, 0.1], [0.927, 0, 0]);
+  pad(m, [0.5, 0.1, 0.14], [0, 0.86, 0.28], [0.2, 0, 0]);
+  tube(m, [0, 0.24, 0.24], [0, 0.66, 0.16], 0.05);
 
   const arms: THREE.Group[] = [];
   [1, -1].forEach((s) => {
@@ -866,28 +919,48 @@ function legPress(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  // 45-degree sled rails
-  tube(m, [0.42, 0.12, 0.7], [0.42, 1.62, -0.86], 0.055);
-  tube(m, [-0.42, 0.12, 0.7], [-0.42, 1.62, -0.86], 0.055);
-  tube(m, [0.42, 0.12, 0.7], [-0.42, 0.12, 0.7], 0.05);
-  box(m, [1.05, 0.08, 0.7], [0, 0.05, 0.75], MATS.frameDark);
+  // The rails run along the line the soles actually travel: the lifter reclines
+  // low and the sled climbs away from them at roughly 30 degrees.
+  const RAIL_A: Vec3 = [0.44, 0.92, 0.42];
+  const RAIL_B: Vec3 = [0.44, 0.16, 1.78];
+  tube(m, RAIL_A, RAIL_B, 0.05);
+  tube(m, [-RAIL_A[0], RAIL_A[1], RAIL_A[2]], [-RAIL_B[0], RAIL_B[1], RAIL_B[2]], 0.05);
+  tube(m, RAIL_B, [-RAIL_B[0], RAIL_B[1], RAIL_B[2]], 0.045);
+  tube(m, [0.44, 0.16, 1.78], [0.44, 0.05, 1.78], 0.05);
+  tube(m, [-0.44, 0.16, 1.78], [-0.44, 0.05, 1.78], 0.05);
+  baseFrame(m, 1.05, 1.2, 1.2);
+  baseFrame(m, 0.9, 0.85, 0.42);
 
-  // reclined seat sits low, at the bottom of the rails
-  pad(m, [0.46, 0.1, 0.5], [0, 0.42, 0.62], [0, 0, 0]);
-  pad(m, [0.44, 0.12, 0.66], [0, 0.66, 0.92], [-1.16, 0, 0]);
-  tube(m, [0, 0.1, 0.6], [0, 0.42, 0.62], 0.05);
+  // reclined seat: pan under the hips, back pad behind the torso
+  const RECLINE = 0.4457;
+  pad(m, [0.46, 0.12, 0.92], [0, 0.44, 0.45], [RECLINE, 0, 0]);
+  pad(m, [0.34, 0.1, 0.22], [0, 0.63, 0.02], [RECLINE, 0, 0]);
+  tube(m, [0, 0.1, 0.62], [0, 0.4, 0.56], 0.055);
+  tube(m, [0, 0.1, 0.2], [0, 0.58, 0.14], 0.055);
+  tube(m, [0.24, 0.56, 0.66], [0.24, 0.8, 0.58], 0.03, MATS.chrome);
+  tube(m, [-0.24, 0.56, 0.66], [-0.24, 0.8, 0.58], 0.03, MATS.chrome);
 
   // moving sled with the foot platform
   const sled = new THREE.Group();
-  box(sled, [0.62, 0.62, 0.07], [0, 0, 0], MATS.frameDark);
-  box(sled, [0.66, 0.66, 0.02], [0, 0, 0.03], MATS.pad);
+  panel(sled, [0.62, 0.62, 0.07], [0, 0, 0], MATS.frameDark);
+  panel(sled, [0.66, 0.66, 0.022], [0, 0, 0.041], MATS.rubber);
+  for (let i = 0; i < 7; i++) {
+    panel(sled, [0.6, 0.012, 0.008], [0, -0.27 + i * 0.09, 0.054], MATS.frameDark);
+  }
   [1, -1].forEach((s) => {
-    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.05, 20), MATS.plate);
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.05, 20), MATS.plate);
     p.rotation.x = Math.PI / 2;
-    p.position.set(0.34 * s, 0.0, -0.08);
+    p.position.set(0.46 * s, 0.0, -0.09);
     sled.add(p);
+    const collar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.035, 0.1, 12),
+      MATS.chrome
+    );
+    collar.rotation.x = Math.PI / 2;
+    collar.position.set(0.46 * s, 0, -0.09);
+    sled.add(collar);
   });
-  sled.rotation.x = -0.72;
+  sled.rotation.x = 0.512;
   m.add(sled);
 
   g.add(m);
@@ -902,8 +975,8 @@ function legPress(rig: Humanoid): SceneBuild {
       hipR: [-1.05, -0.09, -0.06],
       kneeL: [1.62, 0, 0],
       kneeR: [1.62, 0, 0],
-      ankleL: [-0.2, 0, 0],
-      ankleR: [-0.2, 0, 0],
+      ankleL: [-0.5, 0, 0],
+      ankleR: [-0.5, 0, 0],
       neck: [0.45, 0, 0],
       shoulderL: [0.5, 0, 0.42],
       shoulderR: [0.5, 0, -0.42],
@@ -919,8 +992,8 @@ function legPress(rig: Humanoid): SceneBuild {
       hipR: [-0.24, -0.05, -0.03],
       kneeL: [0.16, 0, 0],
       kneeR: [0.16, 0, 0],
-      ankleL: [-0.1, 0, 0],
-      ankleR: [-0.1, 0, 0],
+      ankleL: [0.14, 0, 0],
+      ankleR: [0.14, 0, 0],
       neck: [0.45, 0, 0],
       shoulderL: [0.5, 0, 0.42],
       shoulderR: [0.5, 0, -0.42],
@@ -931,13 +1004,13 @@ function legPress(rig: Humanoid): SceneBuild {
 
   return {
     group: g,
-    camera: { pos: [2.9, 1.7, 2.2], target: [0, 0.85, 0.1] },
+    camera: { pos: [3.1, 1.65, 2.5], target: [0, 0.62, 0.85] },
     start,
     end,
     update(_t, r) {
-      // the platform rides on the soles of the feet
-      const a = r.worldOf('ankleL').add(r.worldOf('ankleR')).multiplyScalar(0.5);
-      sled.position.set(0, a.y + 0.06, a.z - 0.16);
+      // the plate rides on the soles, so it has to track the foot's orientation
+      const sole = r.joints.ankleL.localToWorld(new THREE.Vector3(0, -SOLE, 0.06));
+      sled.position.set(0, sole.y - 0.031, sole.z + 0.055);
     },
   };
 }
@@ -946,7 +1019,7 @@ function legExtension(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.85, 0.09, 1.1], [0, 0.05, -0.15], MATS.frameDark);
+  baseFrame(m, 0.85, 1.1, -0.15);
   seatUnit(m, -0.05, -0.2, true);
   tube(m, [0.34, 0.16, 0.16], [0.34, 0.52, 0.16], 0.045);
   tube(m, [-0.34, 0.16, 0.16], [-0.34, 0.52, 0.16], 0.045);
@@ -997,7 +1070,7 @@ function legCurl(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.85, 0.09, 1.15], [0, 0.05, -0.15], MATS.frameDark);
+  baseFrame(m, 0.85, 1.15, -0.15);
   seatUnit(m, -0.05, -0.24, true);
   // thigh restraint
   pad(m, [0.42, 0.1, 0.16], [0, 0.7, 0.3]);
@@ -1050,49 +1123,94 @@ function calfRaise(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.8, 0.09, 1.0], [0, 0.05, -0.15], MATS.frameDark);
-  pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP, -0.14]);
-  cylinder(m, 0.05, SEAT_TOP, [0, SEAT_TOP / 2, -0.14], MATS.frame);
-  pad(m, [0.4, 0.1, 0.5], [0, SEAT_TOP + 0.32, -0.36], [-0.1, 0, 0]);
-  // foot block
-  box(m, [0.5, 0.16, 0.2], [0, 0.09, 0.42], MATS.frameDark);
-  box(m, [0.5, 0.02, 0.2], [0, 0.18, 0.42], MATS.pad);
+  const ROOT_Y = HIP_SEATED;
+  const ROOT_Z = -0.16;
+  const LEAN = -0.06;
+  const BLOCK_TOP = 0.155;
+  const BALL_Z = 0.42;
 
-  // knee pads on a lever the calves push up
-  const kneePad = pad(m, [0.44, 0.12, 0.18], [0, 0.72, 0.14]);
-  tube(m, [0.3, 0.3, -0.02], [0.3, 0.72, 0.12], 0.03, MATS.chrome);
-  tube(m, [-0.3, 0.3, -0.02], [-0.3, 0.72, 0.12], 0.03, MATS.chrome);
-  const stack = weightStack(m, [0, 0.06, -0.66], 8, 4);
+  baseFrame(m, 0.72, 1.3, 0.02);
+  seatUnit(m, ROOT_Z, -0.14, true);
+
+  // Toe rail. The balls of the feet ride the top, the heels drop behind it and
+  // the toes point down past the front, so nothing ever meets solid steel.
+  panel(m, [0.56, BLOCK_TOP - 0.03, 0.1], [0, (BLOCK_TOP - 0.03) / 2, BALL_Z], MATS.frameDark);
+  panel(m, [0.58, 0.03, 0.12], [0, BLOCK_TOP - 0.015, BALL_Z], MATS.rubber);
+  for (let i = 0; i < 4; i++) {
+    panel(
+      m,
+      [0.52, 0.006, 0.012],
+      [0, BLOCK_TOP + 0.004, BALL_Z - 0.036 + i * 0.024],
+      MATS.frameDark
+    );
+  }
+  panel(m, [0.58, 0.075, 0.3], [0, 0.0375, BALL_Z + 0.2], MATS.frameDark);
+
+  // knee pads on the lever the calves drive upward
+  const lever = new THREE.Group();
+  pad(lever, [0.46, 0.13, 0.2], [0, 0, 0]);
+  panel(lever, [0.06, 0.05, 0.22], [0.19, -0.08, 0], MATS.frame);
+  panel(lever, [0.06, 0.05, 0.22], [-0.19, -0.08, 0], MATS.frame);
+  m.add(lever);
+
+  const postL = new Link(0.026, MATS.chrome, 10);
+  const postR = new Link(0.026, MATS.chrome, 10);
+  m.add(postL.mesh);
+  m.add(postR.mesh);
+  tube(m, [0.3, 0.07, 0.16], [0.3, 0.34, 0.16], 0.042);
+  tube(m, [-0.3, 0.07, 0.16], [-0.3, 0.34, 0.16], 0.042);
+
+  const stack = weightStack(m, [0, 0.06, -0.72], 8, 4);
+  tube(m, [0, 0.06, -0.5], [0, 0.72, -0.5], 0.03, MATS.chrome);
 
   g.add(m);
-  contactShadow(g, 0.7);
+  contactShadow(g, 0.75);
   g.add(rig.root);
 
   const upper = {
-    hipL: [-1.5, 0.05, 0.04],
-    hipR: [-1.5, -0.05, -0.04],
-    kneeL: [1.42, 0, 0],
-    kneeR: [1.42, 0, 0],
-    shoulderL: [0.36, 0, 0.28],
-    shoulderR: [0.36, 0, -0.28],
-    elbowL: [-1.3, 0, 0],
-    elbowR: [-1.3, 0, 0],
+    spine: [0.04, 0, 0],
+    chest: [0.04, 0, 0],
+    shoulderL: [0.34, 0, 0.26],
+    shoulderR: [0.34, 0, -0.26],
+    elbowL: [-1.24, 0, 0],
+    elbowR: [-1.24, 0, 0],
   } as Partial<Pose['joints']>;
+
+  const stretched = legIK({
+    rootY: ROOT_Y,
+    rootZ: ROOT_Z,
+    rootRot: LEAN,
+    ...ankleOverBall(BALL_Z, BLOCK_TOP, -0.4),
+  });
+  const raised = legIK({
+    rootY: ROOT_Y,
+    rootZ: ROOT_Z,
+    rootRot: LEAN,
+    ...ankleOverBall(BALL_Z, BLOCK_TOP, 0.62),
+  });
+
+  const anchorL = new THREE.Vector3(0.3, 0.34, 0.16);
+  const anchorR = new THREE.Vector3(-0.3, 0.34, 0.16);
 
   return {
     group: g,
-    camera: { pos: [2.2, 1.3, 2.3], target: [0, 0.7, 0.15] },
+    camera: { pos: [2.25, 1.25, 2.35], target: [0, 0.62, 0.2] },
     start: {
-      root: { pos: [0, HIP_SEATED - 0.03, -0.14], rot: [-0.05, 0, 0] },
-      joints: { ...upper, ankleL: [-0.5, 0, 0], ankleR: [-0.5, 0, 0] },
+      root: { pos: [0, ROOT_Y, ROOT_Z], rot: [LEAN, 0, 0] },
+      joints: { ...upper, ...legPose(stretched, 0.06) },
+      grip: 0.72,
     },
     end: {
-      root: { pos: [0, HIP_SEATED + 0.05, -0.14], rot: [-0.05, 0, 0] },
-      joints: { ...upper, ankleL: [0.62, 0, 0], ankleR: [0.62, 0, 0] },
+      root: { pos: [0, ROOT_Y, ROOT_Z], rot: [LEAN, 0, 0] },
+      joints: { ...upper, ...legPose(raised, 0.06) },
+      grip: 0.86,
     },
     update(t, r) {
-      kneePad.position.y = r.worldOf('kneeL').y + 0.1;
-      stack.setLift(t, 0.14);
+      const knee = r.worldOf('kneeL').add(r.worldOf('kneeR')).multiplyScalar(0.5);
+      lever.position.set(0, knee.y + 0.142, knee.z - 0.07);
+      postL.set(anchorL, new THREE.Vector3(0.19, lever.position.y - 0.08, lever.position.z));
+      postR.set(anchorR, new THREE.Vector3(-0.19, lever.position.y - 0.08, lever.position.z));
+      stack.setLift(t, 0.16);
     },
   };
 }
@@ -1101,14 +1219,18 @@ function abCrunch(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.85, 0.09, 1.05], [0, 0.05, -0.15], MATS.frameDark);
-  pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP, 0]);
+  baseFrame(m, 0.85, 1.05, -0.15);
+  pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP - 0.051, 0]);
   cylinder(m, 0.05, SEAT_TOP, [0, SEAT_TOP / 2, 0], MATS.frame);
   pad(m, [0.4, 0.1, 0.44], [0, SEAT_TOP + 0.28, -0.22], [-0.1, 0, 0]);
-  tube(m, [0, 0.4, -0.3], [0, 1.5, -0.36], 0.05);
-  // ankle rollers
-  cylinder(m, 0.055, 0.42, [0, 0.24, 0.34], MATS.pad, [0, 0, Math.PI / 2]);
-  tube(m, [0, 0.44, 0.1], [0, 0.24, 0.34], 0.03, MATS.chrome);
+  tube(m, [0, 0.4, -0.34], [0, 1.5, -0.4], 0.05);
+  // footplate, with the restraint roller resting across the top of the ankles
+  panel(m, [0.5, 0.09, 0.3], [0, 0.125, 0.36], MATS.frameDark);
+  panel(m, [0.52, 0.02, 0.32], [0, 0.18, 0.36], MATS.rubber);
+  cylinder(m, 0.055, 0.44, [0, 0.4, 0.34], MATS.pad, [0, 0, Math.PI / 2]);
+  tube(m, [0.2, 0.56, 0.12], [0.2, 0.4, 0.34], 0.026, MATS.chrome);
+  tube(m, [-0.2, 0.56, 0.12], [-0.2, 0.4, 0.34], 0.026, MATS.chrome);
+  tube(m, [0.2, 0.56, 0.12], [-0.2, 0.56, 0.12], 0.03, MATS.chrome);
 
   // the chest pad + handles swing forward with the torso
   const yoke = new THREE.Group();
@@ -1116,16 +1238,16 @@ function abCrunch(rig: Humanoid): SceneBuild {
   cylinder(yoke, 0.022, 0.24, [0.24, 0.16, 0.05], MATS.grip, [Math.PI / 2, 0, 0]);
   cylinder(yoke, 0.022, 0.24, [-0.24, 0.16, 0.05], MATS.grip, [Math.PI / 2, 0, 0]);
   m.add(yoke);
-  const armLink = new Link(0.03, MATS.chrome, 8);
-  m.add(armLink.mesh);
+  const armLinks = [new Link(0.03, MATS.chrome, 8), new Link(0.03, MATS.chrome, 8)];
+  armLinks.forEach((l) => m.add(l.mesh));
   const stack = weightStack(m, [0, 0.06, -0.68], 9, 3);
 
   g.add(m);
   contactShadow(g, 0.7);
   g.add(rig.root);
 
-  const legsStart = seatedLegs({ lean: -0.1, footZ: 0.34, footY: 0.24 });
-  const legsEnd = seatedLegs({ lean: 0.42, footZ: 0.34, footY: 0.24 });
+  const legsStart = seatedLegs({ lean: -0.1, footZ: 0.34, footY: 0.27 });
+  const legsEnd = seatedLegs({ lean: 0.42, footZ: 0.34, footY: 0.27 });
 
   return {
     group: g,
@@ -1159,7 +1281,14 @@ function abCrunch(rig: Humanoid): SceneBuild {
       const c = r.worldOf('chest');
       yoke.position.set(0, c.y + 0.04, c.z + 0.19);
       yoke.rotation.x = -0.1 + t * 0.52;
-      armLink.set(new THREE.Vector3(0, 1.46, -0.36), yoke.position);
+      armLinks[0].set(
+        new THREE.Vector3(0.24, 1.46, -0.4),
+        new THREE.Vector3(0.24, yoke.position.y, yoke.position.z)
+      );
+      armLinks[1].set(
+        new THREE.Vector3(-0.24, 1.46, -0.4),
+        new THREE.Vector3(-0.24, yoke.position.y, yoke.position.z)
+      );
       stack.setLift(t, 0.24);
     },
   };
@@ -1169,8 +1298,8 @@ function hipAbduction(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  box(m, [0.95, 0.09, 1.05], [0, 0.05, -0.15], MATS.frameDark);
-  pad(m, [0.4, 0.09, 0.4], [0, SEAT_TOP, 0]);
+  baseFrame(m, 0.95, 1.05, -0.15);
+  pad(m, [0.4, 0.09, 0.4], [0, SEAT_TOP - 0.051, 0]);
   cylinder(m, 0.05, SEAT_TOP, [0, SEAT_TOP / 2, 0], MATS.frame);
   pad(m, [0.42, 0.11, 0.52], [0, SEAT_TOP + 0.32, -0.22], [-0.14, 0, 0]);
   tube(m, [0, 0.4, -0.3], [0, 1.1, -0.34], 0.05);
@@ -1253,7 +1382,7 @@ function cableColumn(rig: Humanoid, variant?: string): SceneBuild {
   const pulleyY = variant === 'face-pull' ? 1.5 : isHigh ? 2.05 : 0.28;
 
   // the column itself, set behind the lifter
-  box(m, [0.5, 0.08, 0.7], [0, 0.05, -0.95], MATS.frameDark);
+  baseFrame(m, 0.5, 0.7, -0.95);
   tube(m, [0.16, 0, -0.95], [0.16, 2.2, -0.95], 0.05);
   tube(m, [-0.16, 0, -0.95], [-0.16, 2.2, -0.95], 0.05);
   tube(m, [-0.16, 2.2, -0.95], [0.16, 2.2, -0.95], 0.045);
@@ -1283,7 +1412,7 @@ function cableColumn(rig: Humanoid, variant?: string): SceneBuild {
 
   // a bench for the wrist curl variant
   if (variant === 'wrist-curl') {
-    pad(m, [0.36, 0.1, 0.9], [0, SEAT_TOP, 0.1]);
+    pad(m, [0.36, 0.1, 0.9], [0, SEAT_TOP - 0.051, 0.1]);
     box(m, [0.1, SEAT_TOP - 0.05, 0.1], [0, (SEAT_TOP - 0.05) / 2, 0.44], MATS.frame);
     box(m, [0.1, SEAT_TOP - 0.05, 0.1], [0, (SEAT_TOP - 0.05) / 2, -0.24], MATS.frame);
   }
@@ -1517,11 +1646,16 @@ function flatBench(rig: Humanoid, variant?: string): SceneBuild {
 
   const showBench = variant === 'bench-press' || variant === 'hammer-curl';
   if (showBench) {
-    pad(m, [0.34, 0.11, 1.25], [0, SEAT_TOP, 0]);
-    box(m, [0.1, SEAT_TOP - 0.06, 0.12], [0, (SEAT_TOP - 0.06) / 2, 0.5], MATS.frame);
-    box(m, [0.1, SEAT_TOP - 0.06, 0.12], [0, (SEAT_TOP - 0.06) / 2, -0.5], MATS.frame);
-    box(m, [0.42, 0.05, 0.14], [0, 0.03, 0.52], MATS.frameDark);
-    box(m, [0.42, 0.05, 0.14], [0, 0.03, -0.52], MATS.frameDark);
+    // on the curl the lifter stands, so the bench moves out of their footprint
+    m.position.z = variant === 'hammer-curl' ? -1.05 : 0;
+    pad(m, [0.34, 0.11, 0.95], [0, SEAT_TOP - 0.071, -0.2]);
+    [0.21, -0.21].forEach((x) => {
+      box(m, [0.08, SEAT_TOP - 0.08, 0.1], [x, (SEAT_TOP - 0.08) / 2, 0.2], MATS.frame);
+      box(m, [0.08, SEAT_TOP - 0.08, 0.1], [x, (SEAT_TOP - 0.08) / 2, -0.62], MATS.frame);
+    });
+    tube(m, [0.21, SEAT_TOP - 0.1, 0.2], [-0.21, SEAT_TOP - 0.1, 0.2], 0.028);
+    baseFrame(m, 0.5, 0.16, 0.2);
+    baseFrame(m, 0.5, 0.16, -0.62);
   }
 
   const dbL = new THREE.Group();
@@ -1664,7 +1798,7 @@ function smithMachine(rig: Humanoid, variant?: string): SceneBuild {
   tube(m, [0.86, 0, -0.5], [0.86, 2.34, -0.5], 0.055);
   tube(m, [-0.86, 0, -0.5], [-0.86, 2.34, -0.5], 0.055);
   tube(m, [-0.86, 2.34, -0.5], [0.86, 2.34, -0.5], 0.05);
-  box(m, [1.9, 0.07, 0.5], [0, 0.04, -0.5], MATS.frameDark);
+  baseFrame(m, 1.9, 0.5, -0.5);
 
   const bar = new THREE.Group();
   cylinder(bar, 0.022, 1.75, [0, 0, 0], MATS.chrome, [0, 0, Math.PI / 2]);

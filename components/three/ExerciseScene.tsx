@@ -204,7 +204,12 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
-    if (width > 0 && height > 0 && !size) setSize({ w: width, h: height });
+    if (width <= 0 || height <= 0) return;
+    // The GL surface can't be resized in place, so a real size change rebuilds
+    // the context via the key below rather than stretching the old one.
+    if (!size || Math.abs(size.w - width) > 1 || Math.abs(size.h - height) > 1) {
+      setSize({ w: width, h: height });
+    }
   };
 
   return (
@@ -217,7 +222,7 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
         </View>
       ) : size ? (
         <GLView
-          key={`${rig.kind}:${rig.variant ?? ''}`}
+          key={`${rig.kind}:${rig.variant ?? ''}:${Math.round(size.w)}x${Math.round(size.h)}`}
           style={{ width: size.w, height: size.h }}
           onContextCreate={onContextCreate}
         />

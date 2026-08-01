@@ -5,6 +5,8 @@ import {
   Gauge,
   ListOrdered,
   Lightbulb,
+  Maximize2,
+  Minimize2,
   Pause,
   Play,
   RotateCcw,
@@ -12,7 +14,7 @@ import {
   Wind,
 } from 'lucide-react-native';
 import * as React from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StatusBar, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ExerciseScene } from '~/components/three/ExerciseScene';
 import {
@@ -62,6 +64,7 @@ export default function ExerciseDetail() {
 
   const [paused, setPaused] = React.useState(false);
   const [tempoIndex, setTempoIndex] = React.useState(1);
+  const [fullscreen, setFullscreen] = React.useState(false);
 
   if (!exercise) {
     return (
@@ -76,15 +79,41 @@ export default function ExerciseDetail() {
 
   const primary = MUSCLE_BY_ID[exercise.primary];
 
+  const controls = (
+    <View
+      className="flex-row items-center justify-center gap-2"
+      pointerEvents="box-none">
+      <Pressable
+        onPress={() => setPaused((p) => !p)}
+        className="h-11 w-11 items-center justify-center rounded-full bg-primary active:opacity-80">
+        <Icon as={paused ? Play : Pause} size={18} className="text-primary-foreground" />
+      </Pressable>
+      <View className="flex-row overflow-hidden rounded-full bg-black/55">
+        {TEMPOS.map((t, i) => (
+          <Pressable
+            key={t.label}
+            onPress={() => setTempoIndex(i)}
+            className={cn('px-3.5 py-2.5 active:opacity-70', i === tempoIndex && 'bg-white/15')}>
+            <Text
+              className={cn(
+                'text-[11px] font-semibold',
+                i === tempoIndex ? 'text-white' : 'text-white/50'
+              )}>
+              {t.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+
   return (
     <View className="flex-1 bg-background">
       {/* ── 3D viewport ─────────────────────────────────────────── */}
       <View style={{ height: 340 }} className="bg-[#0D0F12]">
-        <ExerciseScene
-          rig={exercise.rig}
-          paused={paused}
-          tempo={TEMPOS[tempoIndex].value}
-        />
+        {fullscreen ? null : (
+          <ExerciseScene rig={exercise.rig} paused={paused} tempo={TEMPOS[tempoIndex].value} />
+        )}
 
         <View
           className="absolute left-0 right-0 flex-row items-center justify-between px-4"
@@ -95,38 +124,60 @@ export default function ExerciseDetail() {
             className="h-10 w-10 items-center justify-center rounded-full bg-black/50 active:opacity-70">
             <Icon as={ChevronLeft} size={20} className="text-white" />
           </Pressable>
-          <View className="flex-row items-center gap-1.5 rounded-full bg-black/50 px-3 py-1.5">
-            <Icon as={RotateCcw} size={12} className="text-white/70" />
-            <Text className="text-[11px] font-medium text-white/70">Drag to rotate</Text>
+          <View className="flex-row items-center gap-2">
+            <View className="flex-row items-center gap-1.5 rounded-full bg-black/50 px-3 py-1.5">
+              <Icon as={RotateCcw} size={12} className="text-white/70" />
+              <Text className="text-[11px] font-medium text-white/70">Drag to rotate</Text>
+            </View>
+            <Pressable
+              onPress={() => setFullscreen(true)}
+              accessibilityLabel="View fullscreen"
+              className="h-10 w-10 items-center justify-center rounded-full bg-black/50 active:opacity-70">
+              <Icon as={Maximize2} size={18} className="text-white" />
+            </Pressable>
           </View>
         </View>
 
-        <View
-          className="absolute bottom-3 left-0 right-0 flex-row items-center justify-center gap-2"
-          pointerEvents="box-none">
-          <Pressable
-            onPress={() => setPaused((p) => !p)}
-            className="h-11 w-11 items-center justify-center rounded-full bg-primary active:opacity-80">
-            <Icon as={paused ? Play : Pause} size={18} className="text-primary-foreground" />
-          </Pressable>
-          <View className="flex-row overflow-hidden rounded-full bg-black/55">
-            {TEMPOS.map((t, i) => (
-              <Pressable
-                key={t.label}
-                onPress={() => setTempoIndex(i)}
-                className={cn('px-3.5 py-2.5 active:opacity-70', i === tempoIndex && 'bg-white/15')}>
-                <Text
-                  className={cn(
-                    'text-[11px] font-semibold',
-                    i === tempoIndex ? 'text-white' : 'text-white/50'
-                  )}>
-                  {t.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+        <View className="absolute bottom-3 left-0 right-0" pointerEvents="box-none">
+          {controls}
         </View>
       </View>
+
+      <Modal
+        visible={fullscreen}
+        animationType="fade"
+        statusBarTranslucent
+        supportedOrientations={['portrait', 'landscape']}
+        onRequestClose={() => setFullscreen(false)}>
+        <View className="flex-1 bg-[#0D0F12]">
+          <StatusBar hidden />
+          {fullscreen ? (
+            <ExerciseScene rig={exercise.rig} paused={paused} tempo={TEMPOS[tempoIndex].value} />
+          ) : null}
+
+          <View
+            className="absolute left-0 right-0 flex-row items-center justify-between px-4"
+            style={{ top: insets.top + 4 }}
+            pointerEvents="box-none">
+            <Text className="max-w-[70%] text-sm font-bold text-white" numberOfLines={1}>
+              {exercise.name}
+            </Text>
+            <Pressable
+              onPress={() => setFullscreen(false)}
+              accessibilityLabel="Exit fullscreen"
+              className="h-10 w-10 items-center justify-center rounded-full bg-black/50 active:opacity-70">
+              <Icon as={Minimize2} size={18} className="text-white" />
+            </Pressable>
+          </View>
+
+          <View
+            className="absolute left-0 right-0"
+            style={{ bottom: insets.bottom + 16 }}
+            pointerEvents="box-none">
+            {controls}
+          </View>
+        </View>
+      </Modal>
 
       {/* ── details ─────────────────────────────────────────────── */}
       <ScrollView
