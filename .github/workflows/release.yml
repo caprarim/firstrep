@@ -1,0 +1,66 @@
+name: Build APK
+
+# The Android SDK and Google's Maven repo are what a release build needs, and
+# they are not reachable from every dev environment. This builds the APK on a
+# runner that can see them: every push gets an artifact to sideload, and a
+# v* tag additionally publishes it as the release the README links to.
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - run: npm ci
+
+      - name: Check the poses build and nothing clips
+        run: |
+          npx esbuild scripts/verify-poses.ts --bundle --platform=node \
+            --format=cjs --outfile=.verify.cjs --external:three
+          node .verify.cjs
+
+      - run: npx tsc --noEmit
+
+      - name: Generate the android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Assemble the release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Name it firstrep.apk
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk dist/firstrep.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firstrep-apk
+          path: dist/firstrep.apk
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/firstrep.apk
+          generate_release_notes: true

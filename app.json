@@ -2,7 +2,7 @@
   "expo": {
     "name": "FirstRep",
     "slug": "firstrep",
-    "version": "1.0.3",
+    "version": "1.1.0",
     "scheme": "firstrep",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -14,7 +14,7 @@
     },
     "android": {
       "package": "com.firstrep.app",
-      "versionCode": 4,
+      "versionCode": 5,
       "adaptiveIcon": {
         "backgroundColor": "#0D0F12",
         "foregroundImage": "./assets/android-icon-foreground.png",

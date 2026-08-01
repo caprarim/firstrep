@@ -38,7 +38,9 @@ Machines are composed from primitives in `components/three/parts.ts` (frame tube
 
 Legs are the one place that does use IK: poses are authored as "hips here, feet planted there" and a two-link solver works out the joint angles. Without it, any pose carrying a torso lean or a hip drop — squats, rows, preacher curls — rotates the legs along with the torso and drives the feet through the floor.
 
-`scripts/verify-poses.ts` builds every scene headlessly and asserts nothing clips the floor, collapses, or goes NaN:
+Two conventions carry most of the weight, because breaking either is invisible in the code and obvious on screen. The figure faces **+Z**, so any machine it pulls against has to be built in front of it — a cable column put behind the lifter still renders, it just draws its cable as a straight line through their chest. And anything the lifter holds is placed from `gripOf()`, the centre of the closed fist, converted into whatever space its parent is in — a prop parented to a machine group that carries an offset otherwise inherits that offset and hangs in mid-air while the hands close on nothing.
+
+`scripts/verify-poses.ts` builds every scene headlessly and checks both of those, plus that nothing clips the floor, collapses, or goes NaN:
 
 ```bash
 npx esbuild scripts/verify-poses.ts --bundle --platform=node --format=cjs \
@@ -53,7 +55,7 @@ npx expo prebuild --platform android
 npm run android
 ```
 
-To rebuild the APK: `npm run apk` (output lands in `android/app/build/outputs/apk/release/`).
+To rebuild the APK: `npm run apk` (output lands in `android/app/build/outputs/apk/release/`). `.github/workflows/release.yml` does the same thing on a runner — every push leaves a `firstrep-apk` artifact, and pushing a `v*` tag publishes it as a release. That is the easier path from any machine without the Android SDK installed, since a release build needs both the SDK and Google's Maven repo.
 
 Bump `expo.android.versionCode` in `app.json` for every build you publish. `npm run apk` runs `expo prebuild` first, which regenerates `android/app/build.gradle` from the template — anything you edit there by hand is overwritten, and a build whose `versionCode` is lower than the one already on the phone is refused as a downgrade. Samsung reports that as "package appears to be invalid", which looks like a corrupt file but isn't.
 
