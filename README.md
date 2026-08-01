@@ -54,6 +54,14 @@ npm run android
 
 To rebuild the APK: `npm run apk` (output lands in `android/app/build/outputs/apk/release/`).
 
+Publish it as a release asset rather than committing it — a binary linked from the file tree can't be downloaded from GitHub's viewer:
+
+```bash
+gh release create v1.1.0 android/app/build/outputs/apk/release/app-release.apk#firstrep.apk
+```
+
+The README's download link tracks `releases/latest`, so it picks up the new build with no edit.
+
 ---
 
 Built for personal use. Not medical or training advice — if something hurts, stop.
