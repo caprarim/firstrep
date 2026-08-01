@@ -13,6 +13,7 @@ import {
   pad,
   panel,
   pulley,
+  rope,
   rubberFoot,
   tube,
   weightStack,
@@ -50,6 +51,13 @@ class CableRun {
   constructor(parent: THREE.Object3D, segments: number, radius = 0.011) {
     for (let i = 0; i < segments; i++) {
       const l = new Link(radius, MATS.cable, 6);
+      // tagged so `scripts/verify-poses.ts` can catch a cable routed through
+      // the lifter instead of past them
+      l.mesh.userData.role = 'cable';
+      // Hidden until the run is first routed: an unset Link is a metre-long
+      // rod standing at the origin, which on a scene that never calls `set`
+      // draws a bar straight through the lifter.
+      l.mesh.visible = false;
       parent.add(l.mesh);
       this.links.push(l);
     }
@@ -70,21 +78,70 @@ class CableRun {
 const _l = new THREE.Vector3();
 const _r = new THREE.Vector3();
 const _d = new THREE.Vector3();
+const _w = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _pq = new THREE.Quaternion();
 
-/** Snaps a bar/handle to sit in both hands, tilting with them. */
-function toHands(bar: THREE.Object3D, rig: Humanoid, drop = 0.07) {
-  _l.copy(rig.worldOf('wristL'));
-  _r.copy(rig.worldOf('wristR'));
-  bar.position.copy(_l).add(_r).multiplyScalar(0.5);
-  bar.position.y -= drop;
-  _d.subVectors(_l, _r);
-  if (_d.lengthSq() > 1e-6) bar.quaternion.setFromUnitVectors(X_AXIS, _d.normalize());
+/**
+ * Writes a world-space point onto an object whatever transform its parent
+ * carries.
+ *
+ * Props are parented to the machine group, and a machine that is offset from
+ * the origin — the bench shoved out of the way on the hammer curl — used to
+ * drag its props off with it, leaving the dumbbells hanging a metre behind the
+ * lifter while the fists closed on nothing.
+ */
+function placeWorld(obj: THREE.Object3D, world: THREE.Vector3) {
+  const parent = obj.parent;
+  if (!parent) {
+    obj.position.copy(world);
+    return;
+  }
+  parent.updateWorldMatrix(true, false);
+  obj.position.copy(parent.worldToLocal(_w.copy(world)));
 }
 
-/** Snaps a single handle into one hand. */
-function toHand(obj: THREE.Object3D, rig: Humanoid, side: 'L' | 'R', drop = 0.07) {
-  obj.position.copy(rig.worldOf(side === 'L' ? 'wristL' : 'wristR'));
-  obj.position.y -= drop;
+function orientWorld(obj: THREE.Object3D, world: THREE.Quaternion) {
+  const parent = obj.parent;
+  if (parent) {
+    parent.updateWorldMatrix(true, false);
+    parent.getWorldQuaternion(_pq);
+    world.premultiply(_pq.invert());
+  }
+  obj.quaternion.copy(world);
+}
+
+/**
+ * Snaps a bar/handle to sit in both fists, tilting with them.
+ *
+ * `gripOf` is the centre of the closed hand, which is where a bar actually
+ * rests; the old "wrist, then drop a fixed distance in world Y" only landed
+ * there while the forearm happened to point straight down, and put the bar
+ * through the forearm on anything curled or pressed overhead.
+ */
+function toHands(bar: THREE.Object3D, rig: Humanoid) {
+  _l.copy(rig.gripOf('L'));
+  _r.copy(rig.gripOf('R'));
+  placeWorld(bar, _w.copy(_l).add(_r).multiplyScalar(0.5));
+  _d.subVectors(_l, _r);
+  if (_d.lengthSq() > 1e-6) {
+    orientWorld(bar, _q.setFromUnitVectors(X_AXIS, _d.normalize()));
+  }
+  bar.userData.heldBy = 'LR';
+}
+
+/** Snaps a machine handle into one fist, leaving its own orientation alone. */
+function toHand(obj: THREE.Object3D, rig: Humanoid, side: 'L' | 'R') {
+  placeWorld(obj, rig.gripOf(side));
+  obj.userData.heldBy = side;
+}
+
+/** Puts a free weight in one fist and turns it the way the hand is turned. */
+function toFist(obj: THREE.Object3D, rig: Humanoid, side: 'L' | 'R') {
+  placeWorld(obj, rig.gripOf(side));
+  rig.joints[side === 'L' ? 'wristL' : 'wristR'].getWorldQuaternion(_q);
+  orientWorld(obj, _q);
+  obj.userData.heldBy = side;
 }
 
 function seatUnit(parent: THREE.Object3D, z = 0, backAngle = -0.12, withBack = true) {
@@ -311,7 +368,7 @@ function latPulldown(rig: Humanoid): SceneBuild {
     start,
     end,
     update(t, r) {
-      toHands(bar, r, 0.06);
+      toHands(bar, r);
       stack.setLift(t, 0.36);
       cable.set([
         bar.position.clone().setY(bar.position.y + 0.02),
@@ -327,16 +384,21 @@ function seatedRow(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  // long rail running away from the lifter
-  box(m, [0.4, 0.1, 1.7], [0, 0.06, -0.55], MATS.frameDark);
-  tube(m, [0, 0.4, -0.82], [0, 1.05, -0.9], 0.05);
-  box(m, [0.62, 0.34, 0.14], [0, 0.17, -0.78], MATS.frame); // foot plate
-  seatUnit(m, 0.05, -0.06, false);
+  // The lifter faces +Z and rows toward themselves, so the whole machine — rail,
+  // foot plate, pulley and stack — lives in front of them. Built behind, the
+  // cable ran from the handle in their hands straight back through their chest.
+  const PLATE_Y = 0.1;
 
-  const front = pulley(m, [0, 0.6, -0.84], 0.05);
-  const stack = weightStack(m, [0, 0.06, -1.24], 11, 4);
-  const stackTop = pulley(m, [0, 1.08, -1.24], 0.05);
-  tube(m, [0, 1.05, -0.9], [0, 1.05, -1.24], 0.04);
+  box(m, [0.4, 0.1, 1.7], [0, 0.06, 0.62], MATS.frameDark);
+  tube(m, [0, 0.4, 0.86], [0, 1.05, 0.94], 0.05);
+  panel(m, [0.62, PLATE_Y, 0.4], [0, PLATE_Y / 2, 0.74], MATS.frameDark); // foot plate
+  panel(m, [0.64, 0.02, 0.42], [0, PLATE_Y, 0.74], MATS.rubber);
+  seatUnit(m, -0.05, -0.06, false);
+
+  const front = pulley(m, [0, 0.62, 0.9], 0.05);
+  const stack = weightStack(m, [0, 0.06, 1.3], 11, 4);
+  const stackTop = pulley(m, [0, 1.08, 1.3], 0.05);
+  tube(m, [0, 1.05, 0.94], [0, 1.05, 1.3], 0.04);
 
   const handle = new THREE.Group();
   // V-handle: two grips angled toward each other
@@ -351,13 +413,12 @@ function seatedRow(rig: Humanoid): SceneBuild {
   g.add(rig.root);
 
   // Feet are up on the machine's platform, not the floor.
-  const PLATE_Y = 0.34;
-  const legOpts = { rootY: HIP_SEATED + 0.02, rootZ: 0.05, footZ: -0.62, footY: PLATE_Y + SOLE };
-  const legsStart = seatedLegs({ ...legOpts, lean: 0.34 });
+  const legOpts = { rootY: HIP_SEATED + 0.02, rootZ: -0.05, footZ: 0.68, footY: PLATE_Y + SOLE };
+  const legsStart = seatedLegs({ ...legOpts, lean: 0.26 });
   const legsEnd = seatedLegs({ ...legOpts, lean: -0.06 });
 
   const start: Pose = {
-    root: { pos: [0, HIP_SEATED + 0.02, 0.05], rot: [0.34, 0, 0] },
+    root: { pos: [0, HIP_SEATED + 0.02, -0.05], rot: [0.26, 0, 0] },
     joints: {
       ...legsStart,
       spine: [0.06, 0, 0],
@@ -371,7 +432,7 @@ function seatedRow(rig: Humanoid): SceneBuild {
   };
 
   const end: Pose = {
-    root: { pos: [0, HIP_SEATED + 0.02, 0.05], rot: [-0.06, 0, 0] },
+    root: { pos: [0, HIP_SEATED + 0.02, -0.05], rot: [-0.06, 0, 0] },
     joints: {
       ...legsEnd,
       spine: [-0.05, 0, 0],
@@ -386,11 +447,11 @@ function seatedRow(rig: Humanoid): SceneBuild {
 
   return {
     group: g,
-    camera: { pos: [2.7, 1.5, 1.9], target: [0, 0.95, -0.5] },
+    camera: { pos: [3.3, 1.5, 0.9], target: [0, 0.9, 0.3] },
     start,
     end,
     update(t, r) {
-      toHands(handle, r, 0.06);
+      toHands(handle, r);
       stack.setLift(t, 0.3);
       cable.set([
         handle.position.clone(),
@@ -406,35 +467,46 @@ function chestSupportedRow(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
-  baseFrame(m, 0.9, 1.2, -0.15);
-  // seat + angled chest pad
-  pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP - 0.051, 0.16]);
-  cylinder(m, 0.05, SEAT_TOP, [0, SEAT_TOP / 2, 0.16], MATS.frame);
-  pad(m, [0.42, 0.12, 0.62], [0, 0.98, -0.24], [0.28, 0, 0]);
-  tube(m, [0, 0.4, -0.34], [0, 1.2, -0.16], 0.05);
+  const LEAN = 0.3;
 
-  // handle towers on both sides
+  baseFrame(m, 0.9, 1.4, 0.32);
+  // Seat under the hips, chest pad in front of the torso and stood up on end so
+  // its face meets the lean. It used to be a near-horizontal slab behind the
+  // lifter's back, so the figure rowed into thin air with nothing touching it.
+  pad(m, [0.4, 0.09, 0.36], [0, SEAT_TOP - 0.051, 0]);
+  cylinder(m, 0.05, SEAT_TOP, [0, SEAT_TOP / 2, 0], MATS.frame);
+  pad(m, [0.34, 0.12, 0.58], [0, 0.83, 0.27], [-(Math.PI / 2 - LEAN), 0, 0]);
+  tube(m, [0, 0.1, 0.66], [0, 0.62, 0.32], 0.05);
+
+  // handles, snapped into the fists each frame
   const arms: THREE.Group[] = [];
-  [1, -1].forEach((s) => {
+  [1, -1].forEach(() => {
     const a = new THREE.Group();
     cylinder(a, 0.022, 0.3, [0, 0, 0], MATS.chrome, [Math.PI / 2, 0, 0]);
     cylinder(a, 0.026, 0.16, [0, 0, 0.12], MATS.grip);
-    a.position.set(0.3 * s, 0.96, 0.2);
     m.add(a);
     arms.push(a);
   });
-  tube(m, [0.44, 0.2, -0.5], [0.44, 1.05, -0.1], 0.045);
-  tube(m, [-0.44, 0.2, -0.5], [-0.44, 1.05, -0.1], 0.045);
-  const stack = weightStack(m, [0, 0.06, -0.62], 10, 4);
+
+  // …and the swing arms they hang off, so the handles are attached to something
+  const pivots = [new THREE.Vector3(0.48, 0.5, 0.84), new THREE.Vector3(-0.48, 0.5, 0.84)];
+  pivots.forEach((p) => {
+    tube(m, [p.x, 0.12, 1.02], [p.x, p.y + 0.02, p.z], 0.045);
+    cylinder(m, 0.045, 0.09, [p.x, p.y, p.z], MATS.frameDark, [0, 0, Math.PI / 2]);
+  });
+  const swing = [new Link(0.028, MATS.frame, 8), new Link(0.028, MATS.frame, 8)];
+  swing.forEach((l) => m.add(l.mesh));
+
+  const stack = weightStack(m, [0, 0.06, 1.06], 10, 4);
 
   g.add(m);
   contactShadow(g, 0.7);
   g.add(rig.root);
 
-  const legs = seatedLegs({ lean: 0.3, rootZ: 0.16, footZ: 0.6 });
+  const legs = seatedLegs({ lean: LEAN, rootZ: 0, footZ: 0.42 });
 
   const start: Pose = {
-    root: { pos: [0, HIP_SEATED, 0.16], rot: [0.3, 0, 0] },
+    root: { pos: [0, HIP_SEATED, 0], rot: [LEAN, 0, 0] },
     joints: {
       ...legs,
       neck: [-0.2, 0, 0],
@@ -446,12 +518,13 @@ function chestSupportedRow(rig: Humanoid): SceneBuild {
   };
 
   const end: Pose = {
-    root: { pos: [0, HIP_SEATED, 0.16], rot: [0.3, 0, 0] },
+    root: { pos: [0, HIP_SEATED, 0], rot: [LEAN, 0, 0] },
     joints: {
       ...legs,
       neck: [-0.16, 0, 0],
-      shoulderL: [0.42, 0, 0.06],
-      shoulderR: [0.42, 0, -0.06],
+      // elbows drive back wide, outside the chest pad rather than through it
+      shoulderL: [0.42, 0, 0.24],
+      shoulderR: [0.42, 0, -0.24],
       elbowL: [-2.34, 0, 0],
       elbowR: [-2.34, 0, 0],
     },
@@ -459,12 +532,14 @@ function chestSupportedRow(rig: Humanoid): SceneBuild {
 
   return {
     group: g,
-    camera: { pos: [2.4, 1.6, 2.2], target: [0, 1.0, 0] },
+    camera: { pos: [3.2, 1.45, 0.8], target: [0, 0.85, 0.25] },
     start,
     end,
     update(t, r) {
-      toHand(arms[0], r, 'L', 0.05);
-      toHand(arms[1], r, 'R', 0.05);
+      toHand(arms[0], r, 'L');
+      toHand(arms[1], r, 'R');
+      swing[0].set(pivots[0], arms[0].position);
+      swing[1].set(pivots[1], arms[1].position);
       stack.setLift(t, 0.26);
     },
   };
@@ -489,14 +564,24 @@ function assistedPullup(rig: Humanoid, variant?: string): SceneBuild {
   cylinder(bar, 0.024, 0.22, [-0.44, 2.22, 0.08], MATS.grip, [0, 0, -0.55]);
   m.add(bar);
 
-  // dip handles
-  const dipBars = new THREE.Group();
-  cylinder(dipBars, 0.023, 0.34, [0.32, 1.06, 0.06], MATS.grip, [Math.PI / 2, 0, 0]);
-  cylinder(dipBars, 0.023, 0.34, [-0.32, 1.06, 0.06], MATS.grip, [Math.PI / 2, 0, 0]);
-  tube(dipBars, [0.32, 1.06, -0.1], [0.5, 1.4, -0.4], 0.03);
-  tube(dipBars, [-0.32, 1.06, -0.1], [-0.5, 1.4, -0.4], 0.03);
-  dipBars.visible = isDip;
-  m.add(dipBars);
+  // Dip handles. These follow the fists like every other machine grip — left
+  // bolted in place they sat at chest height and ran through the lifter's ribs.
+  const dipPivots = [new THREE.Vector3(0.5, 1.34, -0.42), new THREE.Vector3(-0.5, 1.34, -0.42)];
+  const dipBars: THREE.Group[] = [];
+  const dipArms = [new Link(0.03, MATS.frame, 8), new Link(0.03, MATS.frame, 8)];
+  if (isDip) {
+    dipPivots.forEach((p) => {
+      const h = new THREE.Group();
+      cylinder(h, 0.023, 0.32, [0, 0, 0], MATS.grip, [Math.PI / 2, 0, 0]);
+      cylinder(h, 0.018, 0.1, [0, 0.05, -0.15], MATS.chrome, [0, 0, Math.PI / 2]);
+      m.add(h);
+      dipBars.push(h);
+      cylinder(m, 0.04, 0.08, [p.x, p.y, p.z], MATS.frameDark, [0, 0, Math.PI / 2]);
+    });
+    dipArms.forEach((l) => m.add(l.mesh));
+    tube(m, [0.5, 0.4, -0.46], [0.5, 1.36, -0.42], 0.04);
+    tube(m, [-0.5, 0.4, -0.46], [-0.5, 1.36, -0.42], 0.04);
+  }
 
   // counterweight knee/foot platform
   const platform = box(m, [0.5, 0.1, 0.26], [0, 0.622, 0.11], MATS.pad);
@@ -544,7 +629,11 @@ function assistedPullup(rig: Humanoid, variant?: string): SceneBuild {
           elbowR: [-0.06, 0, 0],
         },
       },
-      update(t) {
+      update(t, r) {
+        toHand(dipBars[0], r, 'L');
+        toHand(dipBars[1], r, 'R');
+        dipArms[0].set(dipPivots[0], dipBars[0].position);
+        dipArms[1].set(dipPivots[1], dipBars[1].position);
         stack.setLift(t, 0.28);
       },
     };
@@ -655,8 +744,8 @@ function chestPress(rig: Humanoid): SceneBuild {
       },
     },
     update(t, r) {
-      toHand(arms[0], r, 'L', 0.04);
-      toHand(arms[1], r, 'R', 0.04);
+      toHand(arms[0], r, 'L');
+      toHand(arms[1], r, 'R');
       linkage[0].set(new THREE.Vector3(0.46, 1.4, -0.34), arms[0].position);
       linkage[1].set(new THREE.Vector3(-0.46, 1.4, -0.34), arms[1].position);
       stack.setLift(t, 0.3);
@@ -719,8 +808,8 @@ function pecDeck(rig: Humanoid): SceneBuild {
       },
     },
     update(t, r) {
-      toHand(arms[0], r, 'L', 0.0);
-      toHand(arms[1], r, 'R', 0.0);
+      toHand(arms[0], r, 'L');
+      toHand(arms[1], r, 'R');
       linkage[0].set(new THREE.Vector3(0.2, 1.66, -0.42), arms[0].position);
       linkage[1].set(new THREE.Vector3(-0.2, 1.66, -0.42), arms[1].position);
       stack.setLift(t, 0.28);
@@ -823,9 +912,9 @@ function rearDeltFly(rig: Humanoid, variant?: string): SceneBuild {
     start,
     end,
     update(t, r) {
-      toHand(handles[0], r, 'L', 0.02);
+      toHand(handles[0], r, 'L');
       if (single) handles[1].position.copy(parked);
-      else toHand(handles[1], r, 'R', 0.02);
+      else toHand(handles[1], r, 'R');
       swing[0].set(pivots[0], handles[0].position);
       swing[1].set(pivots[1], handles[1].position);
       stack.setLift(single ? t * 0.6 : t, 0.3);
@@ -884,8 +973,8 @@ function shoulderPress(rig: Humanoid): SceneBuild {
       },
     },
     update(t, r) {
-      toHand(arms[0], r, 'L', 0.04);
-      toHand(arms[1], r, 'R', 0.04);
+      toHand(arms[0], r, 'L');
+      toHand(arms[1], r, 'R');
       linkage[0].set(new THREE.Vector3(0.42, 1.84, -0.32), arms[0].position);
       linkage[1].set(new THREE.Vector3(-0.42, 1.84, -0.32), arms[1].position);
       stack.setLift(t, 0.3);
@@ -976,7 +1065,9 @@ function preacherCurl(rig: Humanoid): SceneBuild {
   });
   const linkage = [new Link(0.026, MATS.chrome, 8), new Link(0.026, MATS.chrome, 8)];
   linkage.forEach((l) => m.add(l.mesh));
-  const stack = weightStack(m, [0, 0.06, 0.62], 9, 3);
+  // stack behind the seat: parked in front it stood between the camera and the
+  // lifter, hiding the arms this exercise exists to show
+  const stack = weightStack(m, [0, 0.06, -0.66], 9, 3);
 
   g.add(m);
   contactShadow(g, 0.7);
@@ -1011,10 +1102,12 @@ function preacherCurl(rig: Humanoid): SceneBuild {
       },
     },
     update(t, r) {
-      toHand(arms[0], r, 'L', 0.05);
-      toHand(arms[1], r, 'R', 0.05);
-      linkage[0].set(new THREE.Vector3(0.2, 0.72, 0.42), arms[0].position);
-      linkage[1].set(new THREE.Vector3(-0.2, 0.72, 0.42), arms[1].position);
+      toHand(arms[0], r, 'L');
+      toHand(arms[1], r, 'R');
+      // the lever pivots level with the elbows on the far side of the pad, so it
+      // reads as a short arm rather than two rods crossing the lifter's face
+      linkage[0].set(new THREE.Vector3(0.3, 0.8, 0.12), arms[0].position);
+      linkage[1].set(new THREE.Vector3(-0.3, 0.8, 0.12), arms[1].position);
       stack.setLift(t, 0.22);
     },
   };
@@ -1486,40 +1579,43 @@ function cableColumn(rig: Humanoid, variant?: string): SceneBuild {
   const isHigh = highSet.has(variant ?? '');
   const pulleyY = variant === 'face-pull' ? 1.5 : isHigh ? 2.05 : 0.28;
 
-  // the column itself, set behind the lifter
-  baseFrame(m, 0.5, 0.7, -0.95);
-  tube(m, [0.16, 0, -0.95], [0.16, 2.2, -0.95], 0.05);
-  tube(m, [-0.16, 0, -0.95], [-0.16, 2.2, -0.95], 0.05);
-  tube(m, [-0.16, 2.2, -0.95], [0.16, 2.2, -0.95], 0.045);
-  const stack = weightStack(m, [0, 0.06, -1.02], 12, 5);
-  const topP = pulley(m, [0, 2.12, -0.9], 0.05);
-  const workP = pulley(m, [0, pulleyY, -0.86], 0.05);
+  /**
+   * Which side of the lifter the column stands on. The figure faces +Z, and on
+   * every one of these you face the machine you are pulling against — bar the
+   * overhead extension, where you step away from the column on purpose. Build
+   * the column on the wrong side and the cable is drawn as a straight line from
+   * the hands to a pulley behind the lifter, straight through their chest.
+   */
+  const F = variant === 'overhead-extension' ? -1 : 1;
+  const at = (x: number, y: number, z: number): [number, number, number] => [x * F, y, z * F];
 
-  // attachment
-  const attach = new THREE.Group();
-  if (variant === 'wrist-curl' || variant === 'reverse-curl' || variant === 'bicep-curl') {
-    handleBar(attach, 0.6);
-  } else if (variant === 'woodchop') {
-    dHandle(attach);
-  } else {
-    // rope with two falling tails
-    cylinder(attach, 0.014, 0.16, [0, 0.07, 0], MATS.cable);
-    [1, -1].forEach((s) => {
-      cylinder(attach, 0.016, 0.22, [0.05 * s, -0.1, 0], MATS.cable, [0, 0, 0.22 * s]);
-      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), MATS.grip);
-      knob.position.set(0.1 * s, -0.2, 0);
-      attach.add(knob);
-    });
+  baseFrame(m, 0.5, 0.7, 0.95 * F);
+  tube(m, at(0.16, 0, 0.95), at(0.16, 2.2, 0.95), 0.05);
+  tube(m, at(-0.16, 0, 0.95), at(-0.16, 2.2, 0.95), 0.05);
+  tube(m, at(-0.16, 2.2, 0.95), at(0.16, 2.2, 0.95), 0.045);
+  const stack = weightStack(m, at(0, 0.06, 1.02), 12, 5);
+  const topP = pulley(m, at(0, 2.12, 0.9), 0.05);
+  const workP = pulley(m, at(0, pulleyY, 0.86), 0.05);
+
+  // attachment. `m` sits at the origin, so its space and world space agree and
+  // the grips can be fed straight to the rope.
+  const isBar =
+    variant === 'wrist-curl' || variant === 'reverse-curl' || variant === 'bicep-curl';
+  const attach = isBar || variant === 'woodchop' ? new THREE.Group() : null;
+  if (attach) {
+    if (isBar) handleBar(attach, 0.6);
+    else dHandle(attach);
+    m.add(attach);
   }
-  m.add(attach);
+  const ropeRig = attach ? null : rope(m);
 
   const cable = new CableRun(m, 3);
 
-  // a bench for the wrist curl variant
+  // a bench for the wrist curl variant, sat on at its front edge
   if (variant === 'wrist-curl') {
-    pad(m, [0.36, 0.1, 0.9], [0, SEAT_TOP - 0.051, 0.1]);
-    box(m, [0.1, SEAT_TOP - 0.05, 0.1], [0, (SEAT_TOP - 0.05) / 2, 0.44], MATS.frame);
-    box(m, [0.1, SEAT_TOP - 0.05, 0.1], [0, (SEAT_TOP - 0.05) / 2, -0.24], MATS.frame);
+    pad(m, [0.36, 0.1, 0.9], [0, SEAT_TOP - 0.051, -0.45]);
+    box(m, [0.1, SEAT_TOP - 0.05, 0.1], [0, (SEAT_TOP - 0.05) / 2, -0.08], MATS.frame);
+    box(m, [0.1, SEAT_TOP - 0.05, 0.1], [0, (SEAT_TOP - 0.05) / 2, -0.82], MATS.frame);
   }
 
   g.add(m);
@@ -1527,6 +1623,7 @@ function cableColumn(rig: Humanoid, variant?: string): SceneBuild {
   g.add(rig.root);
 
   const poses = cablePoses(variant);
+  const clip = new THREE.Vector3();
 
   return {
     group: g,
@@ -1534,11 +1631,19 @@ function cableColumn(rig: Humanoid, variant?: string): SceneBuild {
     start: poses.start,
     end: poses.end,
     update(t, r) {
-      if (variant === 'woodchop') toHand(attach, r, 'L', 0.05);
-      else toHands(attach, r, 0.06);
+      if (ropeRig) {
+        ropeRig.setEnds(r.gripOf('L'), r.gripOf('R'), workP);
+        clip.copy(ropeRig.hub);
+      } else if (variant === 'woodchop') {
+        toHand(attach!, r, 'L');
+        clip.copy(attach!.position).setY(attach!.position.y + 0.09);
+      } else {
+        toHands(attach!, r);
+        clip.copy(attach!.position);
+      }
       stack.setLift(t, 0.3);
       cable.set([
-        attach.position.clone(),
+        clip.clone(),
         workP,
         topP,
         stack.carriage.getWorldPosition(new THREE.Vector3()),
@@ -1548,52 +1653,65 @@ function cableColumn(rig: Humanoid, variant?: string): SceneBuild {
 }
 
 function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBuild['camera'] } {
-  const stand = standingLegs({ lean: 0.1, rootZ: 0.15, footZ: 0.16 });
-  const rootStand = { pos: [0, HIP_HEIGHT, 0.15] as Vec3, rot: [0, 0, 0] as Vec3 };
+  // Stood back from the column far enough that the cable runs clear of the
+  // chest on the way to the pulley instead of grazing it at lockout.
+  const stand = standingLegs({ lean: 0.05, rootZ: 0.26, footZ: 0.26 });
+  const rootStand = { pos: [0, HIP_HEIGHT, 0.26] as Vec3, rot: [0.05, 0, 0] as Vec3 };
+
+  /**
+   * The lifter faces the column, so the camera cannot sit in front of them
+   * without the machine standing in the shot. It goes off to the side instead
+   * and swings a little way round toward the front — which is the angle a
+   * pushdown or a curl is filmed from anyway, because it is the one that shows
+   * the elbow.
+   */
+  const sideOn: SceneBuild['camera'] = { pos: [3.0, 1.6, 1.35], target: [0, 1.0, 0.36] };
 
   switch (variant) {
     case 'tricep-pushdown':
       return {
-        camera: { pos: [2.2, 1.6, 2.4], target: [0, 1.15, 0] },
+        camera: sideOn,
         start: {
-          root: { ...rootStand, rot: [0.1, 0, 0] },
+          root: { ...rootStand },
           joints: {
             ...stand,
-            shoulderL: [-0.26, 0, 0.14],
-            shoulderR: [-0.26, 0, -0.14],
-            elbowL: [-1.72, 0, 0],
-            elbowR: [-1.72, 0, 0],
+            shoulderL: [-0.24, 0, 0.12],
+            shoulderR: [-0.24, 0, -0.12],
+            elbowL: [-1.78, 0, 0],
+            elbowR: [-1.78, 0, 0],
           },
         },
         end: {
-          root: { ...rootStand, rot: [0.1, 0, 0] },
+          root: { ...rootStand },
           joints: {
             ...stand,
-            shoulderL: [-0.06, 0, 0.12],
-            shoulderR: [-0.06, 0, -0.12],
-            elbowL: [-0.05, 0, 0],
-            elbowR: [-0.05, 0, 0],
+            // locked out with the hands just clear of the thighs, not pinned
+            // against them — the rope has to hang somewhere
+            shoulderL: [-0.16, 0, 0.1],
+            shoulderR: [-0.16, 0, -0.1],
+            elbowL: [-0.06, 0, 0],
+            elbowR: [-0.06, 0, 0],
           },
         },
       };
 
     case 'straight-arm-pulldown':
       return {
-        camera: { pos: [2.3, 1.6, 2.5], target: [0, 1.15, 0] },
+        camera: { pos: [3.1, 1.65, 1.4], target: [0, 1.05, 0.36] },
         start: {
-          root: { pos: [0, HIP_HEIGHT - 0.03, 0.3], rot: [0.24, 0, 0] },
+          root: { pos: [0, HIP_HEIGHT - 0.03, 0.25], rot: [0.2, 0, 0] },
           joints: {
-            ...standingLegs({ lean: 0.24, rootY: HIP_HEIGHT - 0.03, rootZ: 0.3, footZ: 0.32 }),
-            shoulderL: [-2.05, 0, 0.16],
-            shoulderR: [-2.05, 0, -0.16],
+            ...standingLegs({ lean: 0.2, rootY: HIP_HEIGHT - 0.03, rootZ: 0.25, footZ: 0.28 }),
+            shoulderL: [-2.0, 0, 0.14],
+            shoulderR: [-2.0, 0, -0.14],
             elbowL: [-0.12, 0, 0],
             elbowR: [-0.12, 0, 0],
           },
         },
         end: {
-          root: { pos: [0, HIP_HEIGHT - 0.03, 0.3], rot: [0.3, 0, 0] },
+          root: { pos: [0, HIP_HEIGHT - 0.03, 0.25], rot: [0.28, 0, 0] },
           joints: {
-            ...standingLegs({ lean: 0.3, rootY: HIP_HEIGHT - 0.03, rootZ: 0.3, footZ: 0.32 }),
+            ...standingLegs({ lean: 0.28, rootY: HIP_HEIGHT - 0.03, rootZ: 0.25, footZ: 0.28 }),
             shoulderL: [-0.16, 0, 0.14],
             shoulderR: [-0.16, 0, -0.14],
             elbowL: [-0.1, 0, 0],
@@ -1604,25 +1722,25 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
 
     case 'face-pull':
       return {
-        camera: { pos: [2.3, 1.7, 2.4], target: [0, 1.3, 0] },
+        camera: { pos: [3.0, 1.78, 1.45], target: [0, 1.25, 0.34] },
         start: {
-          root: { pos: [0, HIP_HEIGHT, 0.45], rot: [0.06, 0, 0] },
+          root: { pos: [0, HIP_HEIGHT, 0.26], rot: [0.04, 0, 0] },
           joints: {
             ...stand,
-            shoulderL: [-1.5, 0, 0.3],
-            shoulderR: [-1.5, 0, -0.3],
+            shoulderL: [-1.5, 0, 0.26],
+            shoulderR: [-1.5, 0, -0.26],
             elbowL: [-0.12, 0, 0],
             elbowR: [-0.12, 0, 0],
           },
         },
         end: {
-          root: { pos: [0, HIP_HEIGHT, 0.45], rot: [-0.04, 0, 0] },
+          root: { pos: [0, HIP_HEIGHT, 0.26], rot: [-0.04, 0, 0] },
           joints: {
             ...stand,
-            shoulderL: [-1.42, 0, 1.28],
-            shoulderR: [-1.42, 0, -1.28],
-            elbowL: [-2.2, 0, 0],
-            elbowR: [-2.2, 0, 0],
+            shoulderL: [-1.4, 0, 1.24],
+            shoulderR: [-1.4, 0, -1.24],
+            elbowL: [-2.25, 0, 0],
+            elbowR: [-2.25, 0, 0],
           },
         },
       };
@@ -1652,44 +1770,43 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
         },
       };
 
-    case 'wrist-curl':
+    case 'wrist-curl': {
+      // Sat on the front edge of the bench, leaning right over so the forearms
+      // lie along the thighs with the wrists hanging past the knees — at the
+      // old 20° lean the elbows could not reach the legs at all and the arms
+      // just floated out in front of the chest.
+      const LEAN = 0.62;
+      const held = {
+        ...seatedLegs({ lean: LEAN, rootZ: -0.05, footZ: 0.36 }),
+        neck: [-0.22, 0, 0],
+        shoulderL: [-0.6, 0, 0.16],
+        shoulderR: [-0.6, 0, -0.16],
+        elbowL: [-1.34, 0, 0],
+        elbowR: [-1.34, 0, 0],
+      } as Partial<Pose['joints']>;
+
       return {
-        camera: { pos: [1.8, 1.1, 2.0], target: [0, 0.7, 0.2] },
+        camera: { pos: [2.3, 1.1, 1.4], target: [0, 0.66, 0.16] },
         start: {
-          root: { pos: [0, HIP_SEATED, 0.1], rot: [0.36, 0, 0] },
-          joints: {
-            ...seatedLegs({ lean: 0.36, rootZ: 0.1, footZ: 0.52 }),
-            neck: [-0.3, 0, 0],
-            shoulderL: [-0.72, 0, 0.16],
-            shoulderR: [-0.72, 0, -0.16],
-            elbowL: [-1.55, 0, 0],
-            elbowR: [-1.55, 0, 0],
-            wristL: [0.7, 0, 0],
-            wristR: [0.7, 0, 0],
-          },
+          root: { pos: [0, HIP_SEATED, -0.05], rot: [LEAN, 0, 0] },
+          joints: { ...held, wristL: [0.7, 0, 0], wristR: [0.7, 0, 0] },
         },
         end: {
-          root: { pos: [0, HIP_SEATED, 0.1], rot: [0.36, 0, 0] },
-          joints: {
-            ...seatedLegs({ lean: 0.36, rootZ: 0.1, footZ: 0.52 }),
-            neck: [-0.3, 0, 0],
-            shoulderL: [-0.72, 0, 0.16],
-            shoulderR: [-0.72, 0, -0.16],
-            elbowL: [-1.55, 0, 0],
-            elbowR: [-1.55, 0, 0],
-            wristL: [-0.55, 0, 0],
-            wristR: [-0.55, 0, 0],
-          },
+          root: { pos: [0, HIP_SEATED, -0.05], rot: [LEAN, 0, 0] },
+          joints: { ...held, wristL: [-0.55, 0, 0], wristR: [-0.55, 0, 0] },
         },
       };
+    }
 
     case 'woodchop':
+      // stood side-on to the column, turning away from it as the handle comes
+      // down across the body
       return {
-        camera: { pos: [2.6, 1.7, 2.2], target: [0, 1.1, 0] },
+        camera: { pos: [3.0, 1.7, 1.5], target: [0, 1.05, 0.25] },
         start: {
-          root: { pos: [0, HIP_HEIGHT - 0.04, 0.2], rot: [0, 0.5, 0.08] },
+          root: { pos: [0, HIP_HEIGHT - 0.04, 0.12], rot: [0, 0.55, 0.08] },
           joints: {
-            ...standingLegs({ lean: 0, rootY: HIP_HEIGHT - 0.04, rootZ: 0.2, footZ: 0.2 }),
+            ...standingLegs({ lean: 0, rootY: HIP_HEIGHT - 0.04, rootZ: 0.12, footZ: 0.12 }),
             spine: [0, 0.24, 0],
             chest: [0, 0.2, 0],
             shoulderL: [-2.5, 0, 0.3],
@@ -1699,9 +1816,9 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
           },
         },
         end: {
-          root: { pos: [0, HIP_HEIGHT - 0.12, 0.2], rot: [0.12, -0.5, -0.08] },
+          root: { pos: [0, HIP_HEIGHT - 0.12, 0.12], rot: [0.12, -0.5, -0.08] },
           joints: {
-            ...standingLegs({ lean: 0.12, rootY: HIP_HEIGHT - 0.12, rootZ: 0.2, footZ: 0.2 }),
+            ...standingLegs({ lean: 0.12, rootY: HIP_HEIGHT - 0.12, rootZ: 0.12, footZ: 0.12 }),
             spine: [0.1, -0.26, 0],
             chest: [0.1, -0.22, 0],
             shoulderL: [-0.32, 0, 0.26],
@@ -1714,34 +1831,37 @@ function cablePoses(variant?: string): { start: Pose; end: Pose; camera: SceneBu
 
     case 'reverse-curl':
     case 'bicep-curl':
-    default:
+    default: {
+      // reverse curl is the same movement held palms-down
+      const wrist: Vec3 = variant === 'reverse-curl' ? [0.35, 0, 0] : [-0.2, 0, 0];
       return {
-        camera: { pos: [2.1, 1.5, 2.4], target: [0, 1.05, 0] },
+        camera: { pos: [2.85, 1.5, 1.6], target: [0, 1.0, 0.3] },
         start: {
-          root: { pos: [0, HIP_HEIGHT, 0.3], rot: [0, 0, 0] },
+          root: { ...rootStand, rot: [0, 0, 0] },
           joints: {
-            ...stand,
+            ...standingLegs({ lean: 0, rootZ: 0.26, footZ: 0.26 }),
             shoulderL: [-0.08, 0, 0.12],
             shoulderR: [-0.08, 0, -0.12],
             elbowL: [-0.1, 0, 0],
             elbowR: [-0.1, 0, 0],
-            wristL: variant === 'reverse-curl' ? [0.35, 0, 0] : [-0.2, 0, 0],
-            wristR: variant === 'reverse-curl' ? [0.35, 0, 0] : [-0.2, 0, 0],
+            wristL: wrist,
+            wristR: wrist,
           },
         },
         end: {
-          root: { pos: [0, HIP_HEIGHT, 0.3], rot: [0, 0, 0] },
+          root: { ...rootStand, rot: [0, 0, 0] },
           joints: {
-            ...stand,
+            ...standingLegs({ lean: 0, rootZ: 0.26, footZ: 0.26 }),
             shoulderL: [-0.24, 0, 0.1],
             shoulderR: [-0.24, 0, -0.1],
             elbowL: [-2.42, 0, 0],
             elbowR: [-2.42, 0, 0],
-            wristL: variant === 'reverse-curl' ? [0.35, 0, 0] : [-0.2, 0, 0],
-            wristR: variant === 'reverse-curl' ? [0.35, 0, 0] : [-0.2, 0, 0],
+            wristL: wrist,
+            wristR: wrist,
           },
         },
       };
+    }
   }
 }
 
@@ -1763,11 +1883,13 @@ function flatBench(rig: Humanoid, variant?: string): SceneBuild {
     baseFrame(m, 0.5, 0.16, -0.62);
   }
 
+  // The dumbbells hang off the scene root, not the bench: the bench carries an
+  // offset on the curl and anything parented to it inherits that offset.
   const dbL = new THREE.Group();
   const dbR = new THREE.Group();
   dumbbell(dbL, variant === 'bench-press' ? 1.15 : 1);
   dumbbell(dbR, variant === 'bench-press' ? 1.15 : 1);
-  m.add(dbL, dbR);
+  g.add(dbL, dbR);
 
   g.add(m);
   contactShadow(g, 0.7);
@@ -1807,8 +1929,8 @@ function flatBench(rig: Humanoid, variant?: string): SceneBuild {
         },
       },
       update(_t, r) {
-        toHand(dbL, r, 'L', 0.06);
-        toHand(dbR, r, 'R', 0.06);
+        toFist(dbL, r, 'L');
+        toFist(dbR, r, 'R');
       },
     };
   }
@@ -1853,14 +1975,19 @@ function flatBench(rig: Humanoid, variant?: string): SceneBuild {
         },
       },
       update(_t, r) {
-        toHand(dbL, r, 'L', 0.06);
-        toHand(dbR, r, 'R', 0.06);
+        toFist(dbL, r, 'L');
+        toFist(dbR, r, 'R');
       },
     };
   }
 
-  // hammer curl, standing, alternating arms
+  // Hammer curl: standing, both arms, neutral grip. The "hammer" is the wrist
+  // rotation — a quarter turn of the forearm, thumbs up — so it is posed on the
+  // wrist joint and the dumbbells simply follow the hands.
   const stand = standingLegs({ lean: 0 });
+  const neutral = { wristL: [0, -Math.PI / 2, 0], wristR: [0, Math.PI / 2, 0] } as Partial<
+    Pose['joints']
+  >;
   return {
     group: g,
     camera: { pos: [2.0, 1.5, 2.4], target: [0, 1.05, 0] },
@@ -1868,6 +1995,7 @@ function flatBench(rig: Humanoid, variant?: string): SceneBuild {
       root: { pos: [0, HIP_HEIGHT, 0], rot: [0, 0, 0] },
       joints: {
         ...stand,
+        ...neutral,
         shoulderL: [-0.06, 0, 0.1],
         shoulderR: [-0.06, 0, -0.1],
         elbowL: [-0.12, 0, 0],
@@ -1878,6 +2006,7 @@ function flatBench(rig: Humanoid, variant?: string): SceneBuild {
       root: { pos: [0, HIP_HEIGHT, 0], rot: [0, 0, 0] },
       joints: {
         ...stand,
+        ...neutral,
         shoulderL: [-0.2, 0, 0.08],
         shoulderR: [-0.2, 0, -0.08],
         elbowL: [-2.5, 0, 0],
@@ -1885,10 +2014,8 @@ function flatBench(rig: Humanoid, variant?: string): SceneBuild {
       },
     },
     update(_t, r) {
-      toHand(dbL, r, 'L', 0.06);
-      toHand(dbR, r, 'R', 0.06);
-      dbL.rotation.y = Math.PI / 2;
-      dbR.rotation.y = Math.PI / 2;
+      toFist(dbL, r, 'L');
+      toFist(dbR, r, 'R');
     },
   };
 }
@@ -1953,7 +2080,7 @@ function smithMachine(rig: Humanoid, variant?: string): SceneBuild {
         },
       },
       update(_t, r) {
-        toHands(bar, r, 0.07);
+        toHands(bar, r);
         bar.rotation.set(0, 0, 0);
       },
     };

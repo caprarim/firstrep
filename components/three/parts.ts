@@ -254,6 +254,65 @@ export function dHandle(parent: THREE.Object3D) {
   return g;
 }
 
+/**
+ * Rope attachment, with the two tails re-aimed at the lifter's fists each frame.
+ *
+ * A rope is the one attachment you do not hold in the middle — there is an end
+ * in each hand — so the tails have to be driven from the grips rather than
+ * modelled hanging off a single point between them.
+ */
+export function rope(parent: THREE.Object3D) {
+  const g = new THREE.Group();
+  const stem = new Link(0.015, MATS.cable, 10);
+  const tails = [new Link(0.016, MATS.cable, 8), new Link(0.016, MATS.cable, 8)];
+  [stem, ...tails].forEach((l) => g.add(l.mesh));
+
+  const knobs = [0, 1].map(() => {
+    const k = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8), MATS.grip);
+    g.add(k);
+    return k;
+  });
+
+  parent.add(g);
+
+  const mid = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  const fork = new THREE.Vector3();
+  /** Where the cable clips on — the top of the stem. */
+  const hub = new THREE.Vector3();
+  const end = new THREE.Vector3();
+
+  return {
+    group: g,
+    hub,
+    /**
+     * `a`/`b` are the two fists and `anchor` the pulley the rope is loaded
+     * toward; the stem lies along that pull, so the rope hangs down on a
+     * pushdown and reaches forward on a face pull instead of always standing
+     * straight up out of the lifter's head.
+     */
+    setEnds(a: THREE.Vector3, b: THREE.Vector3, anchor: THREE.Vector3) {
+      mid.addVectors(a, b).multiplyScalar(0.5);
+      dir.subVectors(anchor, mid);
+      if (dir.lengthSq() < 1e-6) dir.set(0, 1, 0);
+      dir.normalize();
+
+      hub.copy(mid).addScaledVector(dir, 0.24);
+      fork.copy(mid).addScaledVector(dir, 0.1);
+      stem.set(hub, fork);
+
+      [a, b].forEach((grip, i) => {
+        tails[i].set(fork, grip);
+        // the knot sits just past the fist, the way a rope end pokes out
+        end.subVectors(grip, fork);
+        if (end.lengthSq() > 1e-6) end.normalize().multiplyScalar(0.05);
+        else end.set(0, 0, 0);
+        knobs[i].position.copy(grip).add(end);
+      });
+    },
+  };
+}
+
 /** Rubber levelling foot under a frame leg. */
 export function rubberFoot(parent: THREE.Object3D, pos: [number, number, number], r = 0.045) {
   const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.12, 0.03, 12), MATS.rubber);
