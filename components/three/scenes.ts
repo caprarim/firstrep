@@ -2024,13 +2024,26 @@ function smithMachine(rig: Humanoid, variant?: string): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
 
+  /**
+   * The whole point of a Smith machine is that the bar cannot leave its rails,
+   * so the bar's Z is a function of its height and never of where the hands
+   * are. The lifter is the one who has to be in the right place — hence the
+   * frame stepping back for the row, where the hands hang further forward than
+   * they do under a squat.
+   */
+  const FZ = variant === 'row' ? 0.66 : 0;
+  const RAIL_BASE = -0.42 + FZ;
+  const RAIL_LEAN = 0.14;
+  const railZ = (y: number) =>
+    RAIL_BASE + Math.max(0, Math.min(1, (y - 0.06) / 2.24)) * RAIL_LEAN;
+
   // rails on a slight forward slope, as real Smith machines have
-  tube(m, [0.78, 0.06, -0.42], [0.78, 2.3, -0.28], 0.04, MATS.chrome);
-  tube(m, [-0.78, 0.06, -0.42], [-0.78, 2.3, -0.28], 0.04, MATS.chrome);
-  tube(m, [0.86, 0, -0.5], [0.86, 2.34, -0.5], 0.055);
-  tube(m, [-0.86, 0, -0.5], [-0.86, 2.34, -0.5], 0.055);
-  tube(m, [-0.86, 2.34, -0.5], [0.86, 2.34, -0.5], 0.05);
-  baseFrame(m, 1.9, 0.5, -0.5);
+  tube(m, [0.78, 0.06, RAIL_BASE], [0.78, 2.3, RAIL_BASE + RAIL_LEAN], 0.04, MATS.chrome);
+  tube(m, [-0.78, 0.06, RAIL_BASE], [-0.78, 2.3, RAIL_BASE + RAIL_LEAN], 0.04, MATS.chrome);
+  tube(m, [0.86, 0, FZ - 0.5], [0.86, 2.34, FZ - 0.5], 0.055);
+  tube(m, [-0.86, 0, FZ - 0.5], [-0.86, 2.34, FZ - 0.5], 0.055);
+  tube(m, [-0.86, 2.34, FZ - 0.5], [0.86, 2.34, FZ - 0.5], 0.05);
+  baseFrame(m, 1.9, 0.5, FZ - 0.5);
 
   const bar = new THREE.Group();
   cylinder(bar, 0.022, 1.75, [0, 0, 0], MATS.chrome, [0, 0, Math.PI / 2]);
@@ -2080,47 +2093,54 @@ function smithMachine(rig: Humanoid, variant?: string): SceneBuild {
         },
       },
       update(_t, r) {
-        toHands(bar, r);
+        // the hands ride the bar up the rails, not the other way round
+        const y = (r.gripOf('L').y + r.gripOf('R').y) / 2;
+        bar.position.set(0, y, railZ(y));
         bar.rotation.set(0, 0, 0);
+        bar.userData.heldBy = 'LR';
       },
     };
   }
 
-  // squat: the bar sits on the traps and travels with the body
+  // Squat: the bar sits on the traps and travels with the body — but it is
+  // still a Smith bar, so it only travels up and down the rails. The grip is
+  // solved to land the fists on it out past the shoulders, elbows down and
+  // back, and held constant through the rep because the bar does not move
+  // relative to the back it is resting on.
+  const rack = {
+    shoulderL: [1.022, 0, 0.768],
+    shoulderR: [1.022, 0, -0.768],
+    elbowL: [0.595, 0, 1.043],
+    elbowR: [0.595, 0, -1.043],
+  } as Partial<Pose['joints']>;
+
   return {
     group: g,
-    camera: { pos: [2.7, 1.7, 2.6], target: [0, 1.1, -0.05] },
+    camera: { pos: [2.7, 1.7, 2.6], target: [0, 1.1, -0.2] },
     start: {
-      root: { pos: [0, HIP_HEIGHT, -0.1], rot: [0.04, 0, 0] },
+      root: { pos: [0, HIP_HEIGHT, -0.21], rot: [0.04, 0, 0] },
       joints: {
-        ...standingLegs({ lean: 0.04, rootY: HIP_HEIGHT, rootZ: -0.1, footZ: 0, splay: 0.07 }),
-        shoulderL: [0.32, 0, 1.45],
-        shoulderR: [0.32, 0, -1.45],
-        elbowL: [-2.3, 0, 0],
-        elbowR: [-2.3, 0, 0],
+        ...standingLegs({ lean: 0.04, rootY: HIP_HEIGHT, rootZ: -0.21, footZ: -0.1, splay: 0.07 }),
+        ...rack,
       },
     },
     end: {
-      root: { pos: [0, HIP_HEIGHT - 0.42, -0.34], rot: [0.34, 0, 0] },
+      root: { pos: [0, HIP_HEIGHT - 0.42, -0.45], rot: [0.34, 0, 0] },
       joints: {
         ...standingLegs({
           lean: 0.34,
           rootY: HIP_HEIGHT - 0.42,
-          rootZ: -0.34,
-          footZ: 0,
+          rootZ: -0.45,
+          footZ: -0.1,
           splay: 0.11,
         }),
-        shoulderL: [0.32, 0, 1.45],
-        shoulderR: [0.32, 0, -1.45],
-        elbowL: [-2.3, 0, 0],
-        elbowR: [-2.3, 0, 0],
+        ...rack,
       },
     },
     update(_t, r) {
-      // bar rests across the upper back, just behind the neck
-      const c = r.worldOf('chest');
+      // bar rests across the upper back, just behind the neck — and on the rails
       const n = r.worldOf('neck');
-      bar.position.set(0, n.y - 0.03, c.z - 0.14);
+      bar.position.set(0, n.y - 0.03, railZ(n.y - 0.03));
       bar.rotation.set(0, 0, 0);
     },
   };
