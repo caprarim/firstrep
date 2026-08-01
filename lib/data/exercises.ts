@@ -6,6 +6,7 @@ export type RigKind =
   | 'seated-row'
   | 'chest-press'
   | 'pec-deck'
+  | 'rear-delt-fly'
   | 'shoulder-press'
   | 'lateral-raise'
   | 'preacher-curl'
@@ -706,6 +707,74 @@ export const EXERCISES: Exercise[] = [
     breathing: 'Out as you raise, in as you lower.',
     starter: '3 sets of 12–15, genuinely light.',
     rig: { kind: 'lateral-raise' },
+  },
+  {
+    id: 'rear-delt-fly',
+    name: 'Rear Delt Fly',
+    machine: 'Reverse Pec Deck / Rear Delt Machine',
+    equipment: 'machine',
+    primary: 'shoulders',
+    secondary: ['back'],
+    difficulty: 'beginner',
+    blurb: 'Hits the back of your shoulders — the bit that fixes rounded posture.',
+    setup: [
+      'It is the same frame as the chest press fly: swing the arms round to the front and sit facing the pad.',
+      'Set the seat height so the handles sit level with your shoulders, not your chin.',
+      'Sit chest-against-the-pad and reach forward for both handles, thumbs up or palms in.',
+    ],
+    steps: [
+      'Start with your arms straight out in front, hands almost touching.',
+      'Sweep both arms out and back in a wide arc, elbows barely bent.',
+      'Stop when your hands are level with your shoulders — squeeze your shoulder blades.',
+      'Let the arms come back forward slowly until you feel a stretch across your upper back.',
+    ],
+    cues: [
+      'Think "spread your arms", not "pull with your hands".',
+      'Keep your chest pinned to the pad the whole set.',
+      'Elbows stay a touch higher than your wrists.',
+    ],
+    mistakes: [
+      'Going too heavy and turning it into a rowing motion with bent elbows.',
+      'Shrugging — the traps take over and the rear delts do nothing.',
+      'Swinging back off the pad to fling the weight round.',
+    ],
+    breathing: 'Out as you sweep the arms back, in as they come forward.',
+    starter: '3 sets of 12–15. This is a light exercise — ego lifting ruins it.',
+    rig: { kind: 'rear-delt-fly' },
+  },
+  {
+    id: 'single-arm-rear-delt-fly',
+    name: 'Single-Arm Rear Delt Fly',
+    machine: 'Reverse Pec Deck / Rear Delt Machine',
+    equipment: 'machine',
+    primary: 'shoulders',
+    secondary: ['back', 'core'],
+    difficulty: 'intermediate',
+    blurb: 'One arm at a time, so your stronger side cannot quietly do all the work.',
+    setup: [
+      'Set the machine up exactly as you would for the two-arm version.',
+      'Sit facing the pad and take only one handle — leave the other arm parked.',
+      'Halve the weight you would use with both arms, then take a little more off.',
+    ],
+    steps: [
+      'Brace your free hand on your thigh or the frame and press your chest into the pad.',
+      'Start with the working arm straight out in front across your body.',
+      'Sweep it out and back until your hand is level with your shoulder.',
+      'Return slowly, letting the shoulder blade travel forward at the end.',
+    ],
+    cues: [
+      'Let the torso rotate a few degrees with the arm — do not fight it, but do not twist to yank the weight.',
+      'Match the rep count on both sides to the weaker arm.',
+      'Keep the working elbow soft and fixed at the same angle throughout.',
+    ],
+    mistakes: [
+      'Cranking the whole torso round to finish the rep.',
+      'Lifting the opposite hip off the seat.',
+      'Doing more reps on your strong side.',
+    ],
+    breathing: 'Out as the arm sweeps back, in as it returns.',
+    starter: '3 sets of 12 per arm. Do the weaker side first.',
+    rig: { kind: 'rear-delt-fly', variant: 'single' },
   },
   {
     id: 'face-pull',

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { MuscleId } from '~/lib/data/muscles';
 
 /**
  * A hand-built humanoid.
@@ -52,6 +53,8 @@ export type Humanoid = {
   /** World-space centre of the closed fist, where a bar actually sits. */
   gripOf: (side: 'L' | 'R') => THREE.Vector3;
   setGrip: (t: number) => void;
+  setHighlight: (primary: MuscleId | null, secondary: MuscleId[]) => void;
+  setActivation: (a: number) => void;
 };
 
 const SEG = {
@@ -87,21 +90,66 @@ export const SOLE = 0.07;
 export const GRIP_DROP = 0.062;
 
 const PALETTE = {
-  skin: 0xd9a179,
-  skinShade: 0xc38d68,
-  shirt: 0x25334a,
-  shirtTrim: 0x30425e,
-  shorts: 0x161d29,
-  shortsTrim: 0x222c3c,
-  shoe: 0xf1f3f6,
-  shoeAccent: 0xf97316,
-  shoeSole: 0x1b1e23,
-  hair: 0x241d16,
-  eye: 0x15181d,
+  body: 0xd2d7de,
+  bodyShade: 0xbcc2cb,
+  shorts: 0x15181e,
+  shortsTrim: 0x232932,
+  shoe: 0x99a0aa,
+  shoeAccent: 0x2b313a,
+  shoeSole: 0x121519,
+};
+
+const TINT = {
+  primaryFill: 0x4d0f06,
+  primaryGlow: 0xff3a16,
+  secondaryFill: 0x0b1a41,
+  secondaryGlow: 0x3f83ff,
 };
 
 function mat(color: number, roughness = 0.72, metalness = 0.02) {
   return new THREE.MeshStandardMaterial({ color, roughness, metalness });
+}
+
+const RIM_VERT = `
+varying vec3 vNormalView;
+varying vec3 vPosView;
+void main() {
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vNormalView = normalize(normalMatrix * normal);
+  vPosView = mv.xyz;
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+const RIM_FRAG = `
+uniform vec3 uColor;
+uniform float uStrength;
+uniform float uPower;
+varying vec3 vNormalView;
+varying vec3 vPosView;
+void main() {
+  vec3 n = normalize(vNormalView);
+  vec3 v = normalize(-vPosView);
+  float facing = clamp(abs(dot(n, v)), 0.0, 1.0);
+  float rim = pow(1.0 - facing, uPower);
+  gl_FragColor = vec4(uColor * rim * uStrength, 1.0);
+}
+`;
+
+function rimMaterial(color: number) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uStrength: { value: 1.0 },
+      uPower: { value: 2.4 },
+    },
+    vertexShader: RIM_VERT,
+    fragmentShader: RIM_FRAG,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.FrontSide,
+  });
 }
 
 type Prof = [number, number][];
@@ -259,7 +307,7 @@ function buildShoe(parent: THREE.Object3D, skin: THREE.Material) {
   swoosh.rotation.x = 0.12;
   g.add(swoosh);
 
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.011, 6, 12), shoe);
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.011, 6, 12), accent);
   collar.rotation.x = Math.PI / 2 - 0.3;
   collar.position.set(0, 0.014, midZ - 0.082);
   g.add(collar);
@@ -273,44 +321,71 @@ function buildShoe(parent: THREE.Object3D, skin: THREE.Material) {
 }
 
 function buildHead(parent: THREE.Object3D, skin: THREE.Material) {
-  const hair = mat(PALETTE.hair, 0.92);
-  const eye = mat(PALETTE.eye, 0.35);
-
-  const skull = ball(0.098, skin, [0.94, 1.1, 1.0], [0, 0.058, 0]);
+  const skull = ball(0.098, skin, [0.93, 1.12, 1.0], [0, 0.058, 0]);
   parent.add(skull);
 
-  const jaw = ball(0.072, skin, [0.94, 0.86, 1.02], [0, 0.008, 0.012]);
+  const occiput = ball(0.09, skin, [0.96, 0.98, 0.94], [0, 0.05, -0.022]);
+  parent.add(occiput);
+
+  const jaw = ball(0.075, skin, [0.9, 0.88, 1.0], [0, 0.006, 0.008]);
   parent.add(jaw);
-
-  const brow = new THREE.Mesh(new THREE.BoxGeometry(0.104, 0.014, 0.03), skin);
-  brow.position.set(0, 0.082, 0.078);
-  brow.rotation.x = -0.12;
-  parent.add(brow);
-
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.019, 0.042, 8), skin);
-  nose.rotation.x = Math.PI / 2 + 0.5;
-  nose.position.set(0, 0.046, 0.094);
-  parent.add(nose);
-
-  [1, -1].forEach((s) => {
-    parent.add(ball(0.011, eye, [1, 0.78, 0.6], [s * 0.034, 0.064, 0.084]));
-    const ear = ball(0.024, skin, [0.42, 1.05, 0.78], [s * 0.094, 0.05, -0.004]);
-    parent.add(ear);
-  });
-
-  const cap = ball(0.101, hair, [0.98, 1.06, 1.02], [0, 0.068, -0.008]);
-  parent.add(cap);
-  const backHair = ball(0.086, hair, [1.0, 0.9, 0.86], [0, 0.038, -0.036]);
-  parent.add(backHair);
 }
 
+type Patch = { mesh: THREE.Mesh; glow: THREE.Mesh; off: THREE.Material };
+
 export function buildHumanoid(): Humanoid {
-  const skin = mat(PALETTE.skin, 0.66);
-  const skinShade = mat(PALETTE.skinShade, 0.7);
-  const shirt = mat(PALETTE.shirt, 0.86);
-  const shirtTrim = mat(PALETTE.shirtTrim, 0.86);
+  const skin = mat(PALETTE.body, 0.44, 0.05);
+  const skinShade = mat(PALETTE.bodyShade, 0.5, 0.05);
   const shorts = mat(PALETTE.shorts, 0.88);
-  const shortsTrim = mat(PALETTE.shortsTrim, 0.84);
+  const shortsTrim = mat(PALETTE.shortsTrim, 0.82);
+
+  const litPrimary = new THREE.MeshStandardMaterial({
+    color: TINT.primaryFill,
+    emissive: TINT.primaryGlow,
+    emissiveIntensity: 1.0,
+    roughness: 0.52,
+    metalness: 0.0,
+  });
+  const litSecondary = new THREE.MeshStandardMaterial({
+    color: TINT.secondaryFill,
+    emissive: TINT.secondaryGlow,
+    emissiveIntensity: 0.7,
+    roughness: 0.52,
+    metalness: 0.0,
+  });
+  const glowPrimary = rimMaterial(TINT.primaryGlow);
+  const glowSecondary = rimMaterial(TINT.secondaryGlow);
+
+  const patches: Partial<Record<MuscleId, Patch[]>> = {};
+
+  function muscle(
+    parent: THREE.Object3D,
+    id: MuscleId,
+    radius: number,
+    scale: Vec3,
+    pos: Vec3,
+    off: THREE.Material = skin,
+    rot?: Vec3
+  ) {
+    const geo = new THREE.SphereGeometry(radius, 16, 12);
+
+    const mesh = new THREE.Mesh(geo, off);
+    mesh.scale.set(...scale);
+    mesh.position.set(...pos);
+    if (rot) mesh.rotation.set(...rot);
+    parent.add(mesh);
+
+    const glow = new THREE.Mesh(geo, glowPrimary);
+    glow.scale.set(scale[0] * 1.16, scale[1] * 1.14, scale[2] * 1.22);
+    glow.position.set(...pos);
+    if (rot) glow.rotation.set(...rot);
+    glow.visible = false;
+    glow.renderOrder = 4;
+    parent.add(glow);
+
+    (patches[id] ??= []).push({ mesh, glow, off });
+    return mesh;
+  }
 
   const root = new THREE.Group();
 
@@ -335,6 +410,10 @@ export function buildHumanoid(): Humanoid {
   waistband.scale.set(1.06, 1, 0.8);
   hips.add(waistband);
 
+  [1, -1].forEach((s) => {
+    muscle(hips, 'glutes', 0.082, [0.92, 0.88, 0.68], [s * 0.058, -0.028, -0.062], shorts);
+  });
+
   const spine = node(hips, 0, SEG.pelvisToSpine, 0);
   const abdomen = latheMesh(
     [
@@ -345,11 +424,18 @@ export function buildHumanoid(): Humanoid {
       [-0.06, 0.122],
       ...capBottom(-0.06, 0.122),
     ],
-    shirt,
+    skin,
     16
   );
   abdomen.scale.set(1.14, 1, 0.78);
   spine.add(abdomen);
+
+  muscle(spine, 'core', 0.062, [1.32, 0.9, 0.5], [0, 0.055, 0.062]);
+  muscle(spine, 'core', 0.062, [1.24, 0.92, 0.5], [0, -0.025, 0.06]);
+  [1, -1].forEach((s) => {
+    muscle(spine, 'core', 0.05, [0.66, 1.5, 0.72], [s * 0.104, 0.01, 0.028]);
+    muscle(spine, 'back', 0.056, [0.8, 1.35, 0.56], [s * 0.052, 0.03, -0.07]);
+  });
 
   const chest = node(spine, 0, SEG.spineToChest, 0);
   const ribcage = latheMesh(
@@ -362,27 +448,18 @@ export function buildHumanoid(): Humanoid {
       [-0.075, 0.12],
       ...capBottom(-0.075, 0.12),
     ],
-    shirt,
+    skin,
     18
   );
   ribcage.scale.set(1.24, 1, 0.74);
   chest.add(ribcage);
 
   [1, -1].forEach((s) => {
-    const pec = ball(0.062, shirt, [1.15, 0.85, 0.62], [s * 0.058, 0.088, 0.098]);
-    chest.add(pec);
-    const trap = ball(0.058, skin, [1.5, 0.62, 0.9], [s * 0.085, SEG.shoulderY + 0.012, -0.012]);
-    chest.add(trap);
+    muscle(chest, 'chest', 0.064, [1.16, 0.84, 0.62], [s * 0.058, 0.086, 0.094]);
+    muscle(chest, 'back', 0.058, [1.52, 0.62, 0.9], [s * 0.085, SEG.shoulderY + 0.012, -0.012]);
+    muscle(chest, 'back', 0.082, [0.6, 1.28, 0.78], [s * 0.14, -0.005, -0.03], skin, [0, 0, -s * 0.2]);
   });
-
-  const strapL = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.018), shirtTrim);
-  strapL.position.set(0.088, SEG.shoulderY - 0.05, 0.072);
-  strapL.rotation.set(0.16, 0, 0.1);
-  chest.add(strapL);
-  const strapR = strapL.clone();
-  strapR.position.x = -0.088;
-  strapR.rotation.z = -0.1;
-  chest.add(strapR);
+  muscle(chest, 'back', 0.086, [1.55, 0.88, 0.42], [0, 0.07, -0.086]);
 
   const neck = node(chest, 0, SEG.chestToNeck, 0);
   const neckMesh = limb(0.09, [[0, 0.052], [1, 0.058]], skin, 12);
@@ -394,8 +471,8 @@ export function buildHumanoid(): Humanoid {
 
   function arm(side: 1 | -1) {
     const shoulder = node(chest, SEG.shoulderX * side, SEG.shoulderY, 0);
-    const deltoid = ball(0.072, skin, [1.0, 1.02, 0.94], [side * 0.006, -0.012, 0]);
-    shoulder.add(deltoid);
+    muscle(shoulder, 'shoulders', 0.074, [1.0, 1.02, 0.94], [side * 0.006, -0.012, 0]);
+    muscle(shoulder, 'shoulders', 0.05, [0.86, 0.9, 0.8], [side * 0.014, -0.036, -0.044]);
     shoulder.add(
       limb(
         SEG.upperArm,
@@ -410,6 +487,8 @@ export function buildHumanoid(): Humanoid {
         0.95
       )
     );
+    muscle(shoulder, 'biceps', 0.05, [0.84, 1.5, 0.62], [0, -0.115, 0.036]);
+    muscle(shoulder, 'triceps', 0.052, [0.84, 1.55, 0.6], [0, -0.14, -0.04]);
 
     const elbow = node(shoulder, 0, -SEG.upperArm, 0);
     elbow.add(ball(0.046, skinShade, [1, 0.9, 1], [0, 0.004, 0]));
@@ -427,6 +506,7 @@ export function buildHumanoid(): Humanoid {
         0.94
       )
     );
+    muscle(elbow, 'forearms', 0.05, [1.08, 1.45, 1.04], [0, -0.08, 0.003]);
 
     const wrist = node(elbow, 0, -SEG.forearm, 0);
     const hand = buildHand(skin, side);
@@ -467,6 +547,8 @@ export function buildHumanoid(): Humanoid {
     );
     cuff.scale.set(1, 1, 0.94);
     hip.add(cuff);
+    muscle(hip, 'quads', 0.086, [0.82, 1.4, 0.48], [0, -0.235, 0.056]);
+    muscle(hip, 'hamstrings', 0.082, [0.8, 1.42, 0.46], [0, -0.25, -0.063]);
 
     const knee = node(hip, 0, -SEG.thigh, 0);
     knee.add(ball(0.064, skinShade, [1, 0.94, 1.02], [0, 0.006, 0.008]));
@@ -484,6 +566,7 @@ export function buildHumanoid(): Humanoid {
         0.92
       )
     );
+    muscle(knee, 'calves', 0.06, [0.92, 1.32, 0.6], [0, -0.118, -0.046]);
 
     const ankle = node(knee, 0, -SEG.shin, 0);
     buildShoe(ankle, skin);
@@ -520,6 +603,29 @@ export function buildHumanoid(): Humanoid {
   const gripL = node(left.wrist, 0, -GRIP_DROP, 0);
   const gripR = node(right.wrist, 0, -GRIP_DROP, 0);
 
+  function setHighlight(primary: MuscleId | null, secondary: MuscleId[]) {
+    const assisting = new Set(secondary);
+    (Object.keys(patches) as MuscleId[]).forEach((id) => {
+      const rank = id === primary ? 1 : assisting.has(id) ? 2 : 0;
+      patches[id]!.forEach((p) => {
+        p.mesh.material = rank === 1 ? litPrimary : rank === 2 ? litSecondary : p.off;
+        p.glow.material = rank === 1 ? glowPrimary : glowSecondary;
+        p.glow.visible = rank !== 0;
+      });
+    });
+  }
+
+  function setActivation(a: number) {
+    const k = Math.max(0, Math.min(1, a));
+    litPrimary.emissiveIntensity = 0.72 + k * 1.35;
+    litSecondary.emissiveIntensity = 0.4 + k * 0.72;
+    glowPrimary.uniforms.uStrength.value = 0.85 + k * 1.5;
+    glowSecondary.uniforms.uStrength.value = 0.45 + k * 0.75;
+  }
+
+  setHighlight(null, []);
+  setActivation(0);
+
   return {
     root,
     joints,
@@ -529,6 +635,8 @@ export function buildHumanoid(): Humanoid {
       left.hand.setGrip(t);
       right.hand.setGrip(t);
     },
+    setHighlight,
+    setActivation,
   };
 }
 

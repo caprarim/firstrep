@@ -4,6 +4,7 @@ import { PanResponder, View, type LayoutChangeEvent } from 'react-native';
 import * as THREE from 'three';
 import { Text } from '~/components/ui/text';
 import type { Rig as RigRef } from '~/lib/data/exercises';
+import type { MuscleId } from '~/lib/data/muscles';
 import { createRenderer, disposeTree } from './renderer';
 import { blendPose, buildHumanoid, type Humanoid } from './rig';
 import { buildScene, type SceneBuild } from './scenes';
@@ -27,9 +28,20 @@ export type ExerciseSceneProps = {
   paused?: boolean;
   /** 0..1 — drive the rep manually instead of animating. */
   scrub?: number | null;
+  primary?: MuscleId | null;
+  secondary?: MuscleId[];
 };
 
-export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }: ExerciseSceneProps) {
+const NO_SECONDARY: MuscleId[] = [];
+
+export function ExerciseScene({
+  rig,
+  tempo = 3.4,
+  paused = false,
+  scrub = null,
+  primary = null,
+  secondary = NO_SECONDARY,
+}: ExerciseSceneProps) {
   const [size, setSize] = React.useState<{ w: number; h: number } | null>(null);
   const [failed, setFailed] = React.useState(false);
 
@@ -37,9 +49,11 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
   const pausedRef = React.useRef(paused);
   const tempoRef = React.useRef(tempo);
   const scrubRef = React.useRef(scrub);
+  const highlightRef = React.useRef({ primary, secondary });
   pausedRef.current = paused;
   tempoRef.current = tempo;
   scrubRef.current = scrub;
+  highlightRef.current = { primary, secondary };
 
   // `orbit` is the in-progress drag; `orbitBase` banks it on release so
   // successive drags accumulate instead of snapping back.
@@ -85,15 +99,15 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
       );
 
       // three-point lighting: warm key, cool fill, rim from behind
-      const hemi = new THREE.HemisphereLight(0x9fb6d4, 0x1a1d21, 0.75);
+      const hemi = new THREE.HemisphereLight(0xb9c9dd, 0x171a1e, 0.7);
       scene.add(hemi);
-      const key = new THREE.DirectionalLight(0xfff0dd, 2.1);
+      const key = new THREE.DirectionalLight(0xffffff, 2.0);
       key.position.set(3.2, 5.0, 3.6);
       scene.add(key);
-      const fill = new THREE.DirectionalLight(0x93b8ff, 0.65);
+      const fill = new THREE.DirectionalLight(0x9dbcff, 0.7);
       fill.position.set(-3.6, 2.2, 1.6);
       scene.add(fill);
-      const rim = new THREE.DirectionalLight(0xffa25c, 1.05);
+      const rim = new THREE.DirectionalLight(0xd8e6ff, 1.35);
       rim.position.set(-1.4, 2.6, -4.2);
       scene.add(rim);
 
@@ -124,6 +138,7 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
       let disposed = false;
       let clock = 0;
       let last = Date.now();
+      let paintedHighlight = '';
 
       const frame = () => {
         if (disposed) return;
@@ -150,6 +165,14 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
           if (!pausedRef.current) clock += dt / Math.max(0.5, tempoRef.current);
           t = repProgress(clock % 1);
         }
+
+        const { primary: hp, secondary: hs } = highlightRef.current;
+        const key = `${hp ?? ''}|${hs.join(',')}`;
+        if (key !== paintedHighlight) {
+          paintedHighlight = key;
+          human.setHighlight(hp, hs);
+        }
+        human.setActivation(t);
 
         blendPose(human, build.start, build.end, t);
         build.update?.(t, human);

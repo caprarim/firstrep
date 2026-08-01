@@ -7,7 +7,8 @@ Walking into a gym for the first time is overwhelming. There are forty machines,
 ## What it does
 
 - **3D animated demonstrations.** Every exercise renders a rigged humanoid figure performing the movement on a model of the actual machine, at a realistic lifting tempo — quicker on the lift, slower on the lower, with a squeeze at the top. Drag to orbit the camera, pause it, or slow it down.
-- **Filter by muscle.** 29 exercises across chest, back, shoulders, biceps, triceps, forearms, core, quads, hamstrings, glutes and calves. Filters stack, and there's a second filter for equipment type (machine / cable / free weight / bodyweight).
+- **Filter by muscle.** 31 exercises across chest, back, shoulders, biceps, triceps, forearms, core, quads, hamstrings, glutes and calves. Filters stack, and there's a second filter for equipment type (machine / cable / free weight / bodyweight).
+- **The worked muscles light up.** The primary muscle glows on the figure as the rep is performed, brightest at the top of the contraction, with the secondary muscles picked out more faintly, so you can see what the movement is actually for.
 - **Real coaching per exercise.** How to set the machine up, how to do the rep, form cues, the common mistakes beginners make, breathing, and a sensible starting weight.
 - **A Basics tab** covering the unwritten rules, what "3x10" means, how to pick a weight, and a three-day first week to follow.
 

@@ -112,7 +112,13 @@ export default function ExerciseDetail() {
       {/* ── 3D viewport ─────────────────────────────────────────── */}
       <View style={{ height: 340 }} className="bg-[#0D0F12]">
         {fullscreen ? null : (
-          <ExerciseScene rig={exercise.rig} paused={paused} tempo={TEMPOS[tempoIndex].value} />
+          <ExerciseScene
+            rig={exercise.rig}
+            paused={paused}
+            tempo={TEMPOS[tempoIndex].value}
+            primary={exercise.primary}
+            secondary={exercise.secondary}
+          />
         )}
 
         <View
@@ -152,7 +158,13 @@ export default function ExerciseDetail() {
         <View className="flex-1 bg-[#0D0F12]">
           <StatusBar hidden />
           {fullscreen ? (
-            <ExerciseScene rig={exercise.rig} paused={paused} tempo={TEMPOS[tempoIndex].value} />
+            <ExerciseScene
+              rig={exercise.rig}
+              paused={paused}
+              tempo={TEMPOS[tempoIndex].value}
+              primary={exercise.primary}
+              secondary={exercise.secondary}
+            />
           ) : null}
 
           <View

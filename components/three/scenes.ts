@@ -728,6 +728,111 @@ function pecDeck(rig: Humanoid): SceneBuild {
   };
 }
 
+function rearDeltFly(rig: Humanoid, variant?: string): SceneBuild {
+  const single = variant === 'single';
+  const g = baseScene();
+  const m = new THREE.Group();
+
+  baseFrame(m, 1.0, 1.0, 0.62);
+
+  tube(m, [0.3, 0.08, 0.58], [0.3, 1.88, 0.58], 0.052);
+  tube(m, [-0.3, 0.08, 0.58], [-0.3, 1.88, 0.58], 0.052);
+  tube(m, [-0.3, 1.86, 0.58], [0.3, 1.86, 0.58], 0.044);
+  tube(m, [0, 1.86, 0.58], [0, 1.86, 1.06], 0.044);
+  tube(m, [0.3, 0.12, 0.58], [0.3, 0.12, 1.06], 0.04, MATS.frameDark);
+  tube(m, [-0.3, 0.12, 0.58], [-0.3, 0.12, 1.06], 0.04, MATS.frameDark);
+
+  seatUnit(m, -0.08, 0, false);
+
+  pad(m, [0.28, 0.1, 0.54], [0, 1.05, 0.2], [Math.PI / 2, 0, 0]);
+  [0.1, -0.1].forEach((x) => tube(m, [x, 1.05, 0.26], [x, 1.05, 0.6], 0.026, MATS.frame));
+
+  const stack = weightStack(m, [0, 0.06, 1.06], 10, 4);
+
+  const pivots = [new THREE.Vector3(0.3, 1.78, 0.58), new THREE.Vector3(-0.3, 1.78, 0.58)];
+  pivots.forEach((p) => cylinder(m, 0.05, 0.1, [p.x, p.y, p.z], MATS.frameDark));
+
+  const handles: THREE.Group[] = [];
+  [1, -1].forEach(() => {
+    const h = new THREE.Group();
+    cylinder(h, 0.021, 0.2, [0, 0, 0], MATS.grip);
+    cylinder(h, 0.015, 0.11, [0, 0.15, 0], MATS.chrome);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), MATS.chrome);
+    cap.position.y = -0.112;
+    h.add(cap);
+    m.add(h);
+    handles.push(h);
+  });
+
+  const swing = [new Link(0.028, MATS.frame, 8), new Link(0.028, MATS.frame, 8)];
+  swing.forEach((l) => m.add(l.mesh));
+
+  g.add(m);
+  contactShadow(g, 0.78);
+  g.add(rig.root);
+
+  const legs = seatedLegs({ lean: -0.1, rootZ: -0.02, footZ: 0.46, splay: 0.1 });
+
+  const idleArm = single
+    ? { shoulderR: [-0.3, 0, -0.1] as Vec3, elbowR: [-1.16, 0, 0] as Vec3 }
+    : null;
+
+  const start: Pose = {
+    root: { pos: [0, HIP_SEATED, -0.02], rot: [-0.1, single ? -0.05 : 0, 0] },
+    joints: {
+      ...legs,
+      spine: [0.03, 0, 0],
+      chest: [0.06, 0, 0],
+      neck: [0.06, 0, 0],
+      shoulderL: [-1.46, -0.14, 0.16],
+      elbowL: [-0.36, 0, 0],
+      wristL: [0, 0, 0.2],
+      ...(idleArm ?? {
+        shoulderR: [-1.46, 0.14, -0.16],
+        elbowR: [-0.36, 0, 0],
+        wristR: [0, 0, -0.2],
+      }),
+    },
+  };
+
+  const end: Pose = {
+    root: { pos: [0, HIP_SEATED, -0.02], rot: [-0.1, single ? 0.11 : 0, 0] },
+    joints: {
+      ...legs,
+      spine: [-0.03, 0, 0],
+      chest: [-0.06, 0, 0],
+      neck: [-0.04, 0, 0],
+      shoulderL: [0.02, 0.3, 1.53],
+      elbowL: [-0.32, 0, 0],
+      wristL: [0, 0, 0.1],
+      ...(idleArm ?? {
+        shoulderR: [0.02, -0.3, -1.53],
+        elbowR: [-0.32, 0, 0],
+        wristR: [0, 0, -0.1],
+      }),
+    },
+  };
+
+  const parked = new THREE.Vector3(-0.2, 1.0, 0.5);
+
+  return {
+    group: g,
+    camera: single
+      ? { pos: [2.5, 1.68, -1.75], target: [0.1, 1.06, 0.1] }
+      : { pos: [2.2, 1.74, -2.0], target: [0, 1.06, 0.12] },
+    start,
+    end,
+    update(t, r) {
+      toHand(handles[0], r, 'L', 0.02);
+      if (single) handles[1].position.copy(parked);
+      else toHand(handles[1], r, 'R', 0.02);
+      swing[0].set(pivots[0], handles[0].position);
+      swing[1].set(pivots[1], handles[1].position);
+      stack.setLift(single ? t * 0.6 : t, 0.3);
+    },
+  };
+}
+
 function shoulderPress(rig: Humanoid): SceneBuild {
   const g = baseScene();
   const m = new THREE.Group();
@@ -1910,6 +2015,8 @@ export function buildScene(ref: RigRef, rig: Humanoid): SceneBuild {
       return chestPress(rig);
     case 'pec-deck':
       return pecDeck(rig);
+    case 'rear-delt-fly':
+      return rearDeltFly(rig, ref.variant);
     case 'shoulder-press':
       return shoulderPress(rig);
     case 'lateral-raise':
