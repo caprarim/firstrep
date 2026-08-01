@@ -3,9 +3,16 @@ import * as THREE from 'three';
 
 /**
  * expo-gl hands us a real WebGL2 context but no DOM canvas. three.js only needs
- * a handful of canvas properties when an existing context is passed in, so we
- * stub exactly those instead of pulling in `expo-three` (which is peer-pinned to
- * three 0.166 and would hold the whole app back).
+ * a handful of canvas properties, so we stub exactly those instead of pulling in
+ * `expo-three` (which is peer-pinned to three 0.166 and would hold the whole app
+ * back).
+ *
+ * The context is handed over through `getContext` rather than the renderer's
+ * `context` option on purpose. expo-gl >= 56.0.5 installs `WebGLRenderingContext`
+ * as a global and makes WebGL2 contexts inherit from it, and three >= r163 throws
+ * "WebGL 1 is not supported" for any `context` that is `instanceof
+ * WebGLRenderingContext`. Passing it via the canvas skips that check, which only
+ * guards the explicit `context` option.
  */
 function canvasShim(gl: ExpoWebGLRenderingContext) {
   const width = gl.drawingBufferWidth;
@@ -25,7 +32,6 @@ function canvasShim(gl: ExpoWebGLRenderingContext) {
 export function createRenderer(gl: ExpoWebGLRenderingContext) {
   const renderer = new THREE.WebGLRenderer({
     canvas: canvasShim(gl),
-    context: gl as unknown as WebGL2RenderingContext,
     antialias: true,
     alpha: false,
   });

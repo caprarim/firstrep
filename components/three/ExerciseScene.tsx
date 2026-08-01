@@ -2,6 +2,7 @@ import { GLView, type ExpoWebGLRenderingContext } from 'expo-gl';
 import * as React from 'react';
 import { PanResponder, View, type LayoutChangeEvent } from 'react-native';
 import * as THREE from 'three';
+import { Text } from '~/components/ui/text';
 import type { Rig as RigRef } from '~/lib/data/exercises';
 import { createRenderer, disposeTree } from './renderer';
 import { blendPose, buildHumanoid, type Humanoid } from './rig';
@@ -30,6 +31,7 @@ export type ExerciseSceneProps = {
 
 export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }: ExerciseSceneProps) {
   const [size, setSize] = React.useState<{ w: number; h: number } | null>(null);
+  const [failed, setFailed] = React.useState(false);
 
   // Mutable refs so the render loop never restarts when props change.
   const pausedRef = React.useRef(paused);
@@ -66,7 +68,7 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
 
   React.useEffect(() => () => teardown.current?.(), []);
 
-  const onContextCreate = React.useCallback(
+  const buildContext = React.useCallback(
     (gl: ExpoWebGLRenderingContext) => {
       teardown.current?.();
 
@@ -127,6 +129,16 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
         if (disposed) return;
         raf = requestAnimationFrame(frame);
 
+        try {
+          step();
+        } catch (err) {
+          disposed = true;
+          cancelAnimationFrame(raf);
+          setFailed(true);
+        }
+      };
+
+      const step = () => {
         const now = Date.now();
         const dt = Math.min(0.05, (now - last) / 1000);
         last = now;
@@ -177,6 +189,19 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
     [rig]
   );
 
+  // A GL failure must degrade to a still, readable screen — an uncaught throw in
+  // this callback terminates the whole app in a release build.
+  const onContextCreate = React.useCallback(
+    (gl: ExpoWebGLRenderingContext) => {
+      try {
+        buildContext(gl);
+      } catch (err) {
+        setFailed(true);
+      }
+    },
+    [buildContext]
+  );
+
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
     if (width > 0 && height > 0 && !size) setSize({ w: width, h: height });
@@ -184,7 +209,13 @@ export function ExerciseScene({ rig, tempo = 3.4, paused = false, scrub = null }
 
   return (
     <View className="flex-1 overflow-hidden" onLayout={onLayout} {...panResponder.panHandlers}>
-      {size ? (
+      {failed ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <Text className="text-center text-xs text-white/40">
+            The 3D view isn't available on this device. The instructions below still apply.
+          </Text>
+        </View>
+      ) : size ? (
         <GLView
           key={`${rig.kind}:${rig.variant ?? ''}`}
           style={{ width: size.w, height: size.h }}
