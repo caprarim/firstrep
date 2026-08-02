@@ -63,14 +63,31 @@ jobs:
           name: firstrep-apk
           path: dist/firstrep.apk
 
-      # Either a v* tag was pushed, or the run was dispatched with a tag to cut.
-      # The second path exists because not every environment that can push a
-      # branch can push a tag; the runner can do both.
+      # A build on the default branch is a release when app.json names a version
+      # that has not been released yet — bumping the version is the deliberate
+      # act, and it has to be bumped anyway or the APK installs as a downgrade.
+      # Re-running an already-released version republishes nothing.
+      - name: Is this version already out?
+        id: ver
+        if: github.ref == 'refs/heads/master' || inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ inputs.release_tag }}"
+          [ -n "$tag" ] || tag="v$(node -p "require('./app.json').expo.version")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "$tag is already released — leaving it alone."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        if: startsWith(github.ref, 'refs/tags/v') || steps.ver.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          tag_name: ${{ steps.ver.outputs.tag || github.ref_name }}
           target_commitish: ${{ github.sha }}
           files: dist/firstrep.apk
           generate_release_notes: true
