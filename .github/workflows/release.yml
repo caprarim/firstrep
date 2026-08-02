@@ -9,6 +9,11 @@ on:
     branches: ['**']
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag to publish this build as, e.g. v1.1.0. Leave blank to just build.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -58,9 +63,14 @@ jobs:
           name: firstrep-apk
           path: dist/firstrep.apk
 
+      # Either a v* tag was pushed, or the run was dispatched with a tag to cut.
+      # The second path exists because not every environment that can push a
+      # branch can push a tag; the runner can do both.
       - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           files: dist/firstrep.apk
           generate_release_notes: true
