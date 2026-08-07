@@ -1,9 +1,12 @@
 import { Tabs } from 'expo-router';
 import { CalendarDays, Dumbbell, GraduationCap, PersonStanding, Target } from 'lucide-react-native';
 import * as React from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '~/components/ui/icon';
 
 export default function TabsLayout() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
@@ -13,8 +16,8 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: '#121519',
           borderTopColor: '#22262C',
-          height: 62,
-          paddingBottom: 8,
+          height: 62 + insets.bottom,
+          paddingBottom: 8 + insets.bottom,
           paddingTop: 8,
         },
         tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
