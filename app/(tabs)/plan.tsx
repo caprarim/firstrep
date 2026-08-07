@@ -14,6 +14,8 @@ import { Text } from '~/components/ui/text';
 import { EXERCISE_BY_ID } from '~/lib/data/exercises';
 import {
   FOOD_TARGETS,
+  HOME_DAYS,
+  HOME_NOTE,
   HONEST_BITS,
   MEALS,
   PLAN_DAYS,
@@ -30,6 +32,8 @@ const STATS: { label: string; value: string }[] = [
   { label: 'Height', value: PROFILE.height },
   { label: 'Weight now', value: PROFILE.weight },
   { label: 'Target', value: PROFILE.goal },
+  { label: 'Training for', value: PROFILE.training },
+  { label: 'Sessions', value: PROFILE.days },
   { label: 'Sleep', value: PROFILE.sleep },
   { label: 'Food', value: PROFILE.food },
 ];
@@ -149,6 +153,43 @@ export default function PlanScreen() {
                   </Pressable>
                 );
               })}
+            </View>
+          ))}
+        </View>
+
+        <SectionTitle>If you cannot get to the gym</SectionTitle>
+        <View className="gap-2.5 rounded-2xl border border-border bg-card p-4">
+          {HOME_NOTE.map((line, i) => (
+            <Text key={i} className="text-sm leading-6 text-foreground/90">
+              {line}
+            </Text>
+          ))}
+        </View>
+
+        <View className="gap-3 pt-3">
+          {HOME_DAYS.map((day) => (
+            <View
+              key={day.letter}
+              className="overflow-hidden rounded-2xl border border-border bg-card">
+              <View className="flex-row items-center gap-3 border-b border-border px-4 py-3">
+                <View className="h-8 w-8 items-center justify-center rounded-full border border-primary">
+                  <Text className="text-sm font-extrabold text-primary">{day.letter}</Text>
+                </View>
+                <View className="flex-1">
+                  <Text className="text-base font-semibold leading-tight">{day.title}</Text>
+                  <Text className="text-xs text-muted-foreground">One dumbbell, up to 7.8 kg</Text>
+                </View>
+              </View>
+
+              {day.exercises.map((item) => (
+                <View key={item.name} className="gap-0.5 px-4 py-2.5">
+                  <Text className="text-sm font-medium leading-tight">{item.name}</Text>
+                  <Text className="text-[11px] text-primary">{item.sets}</Text>
+                  {item.note ? (
+                    <Text className="text-[11px] leading-4 text-muted-foreground">{item.note}</Text>
+                  ) : null}
+                </View>
+              ))}
             </View>
           ))}
         </View>
