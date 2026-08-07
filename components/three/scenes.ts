@@ -956,20 +956,20 @@ function shoulderPress(rig: Humanoid): SceneBuild {
       root: { pos: [0, HIP_SEATED, 0.05], rot: [-0.03, 0, 0] },
       joints: {
         ...legs,
-        shoulderL: [-0.16, 0, 1.3],
-        shoulderR: [-0.16, 0, -1.3],
-        elbowL: [-1.72, 0, 0],
-        elbowR: [-1.72, 0, 0],
+        shoulderL: [0, 0, 1.28],
+        shoulderR: [0, 0, -1.28],
+        elbowL: [0, 0, 1.5],
+        elbowR: [0, 0, -1.5],
       },
     },
     end: {
       root: { pos: [0, HIP_SEATED, 0.05], rot: [-0.03, 0, 0] },
       joints: {
         ...legs,
-        shoulderL: [-0.1, 0, 2.86],
-        shoulderR: [-0.1, 0, -2.86],
-        elbowL: [-0.14, 0, 0],
-        elbowR: [-0.14, 0, 0],
+        shoulderL: [0, 0, 2.84],
+        shoulderR: [0, 0, -2.84],
+        elbowL: [0, 0, 0.08],
+        elbowR: [0, 0, -0.08],
       },
     },
     update(t, r) {
@@ -1219,8 +1219,8 @@ function legExtension(rig: Humanoid): SceneBuild {
 
   baseFrame(m, 0.85, 1.1, -0.15);
   seatUnit(m, -0.05, -0.2, true);
-  tube(m, [0.34, 0.16, 0.16], [0.34, 0.52, 0.16], 0.045);
-  tube(m, [-0.34, 0.16, 0.16], [-0.34, 0.52, 0.16], 0.045);
+  tube(m, [0.34, 0.16, 0.38], [0.34, 0.56, 0.38], 0.045);
+  tube(m, [-0.34, 0.16, 0.38], [-0.34, 0.56, 0.38], 0.045);
 
   // swinging ankle lever
   const lever = new THREE.Group();
@@ -1258,7 +1258,7 @@ function legExtension(rig: Humanoid): SceneBuild {
     update(t, r) {
       const a = r.worldOf('ankleL').add(r.worldOf('ankleR')).multiplyScalar(0.5);
       lever.position.copy(a).add(new THREE.Vector3(0, 0.02, 0.06));
-      arm.set(new THREE.Vector3(0, 0.52, 0.16), lever.position);
+      arm.set(new THREE.Vector3(0, 0.56, 0.38), lever.position);
       stack.setLift(t, 0.28);
     },
   };
@@ -1274,8 +1274,8 @@ function legCurl(rig: Humanoid): SceneBuild {
   pad(m, [0.42, 0.1, 0.16], [0, 0.7, 0.3]);
   tube(m, [0.24, 0.5, 0.34], [0.24, 0.72, 0.3], 0.026, MATS.chrome);
   tube(m, [-0.24, 0.5, 0.34], [-0.24, 0.72, 0.3], 0.026, MATS.chrome);
-  tube(m, [0.34, 0.16, 0.2], [0.34, 0.5, 0.2], 0.045);
-  tube(m, [-0.34, 0.16, 0.2], [-0.34, 0.5, 0.2], 0.045);
+  tube(m, [0.34, 0.16, 0.39], [0.34, 0.55, 0.39], 0.045);
+  tube(m, [-0.34, 0.16, 0.39], [-0.34, 0.55, 0.39], 0.045);
 
   const lever = new THREE.Group();
   pad(lever, [0.36, 0.11, 0.12], [0, 0, 0], [0, 0, Math.PI / 2]);
@@ -1311,7 +1311,7 @@ function legCurl(rig: Humanoid): SceneBuild {
     update(t, r) {
       const a = r.worldOf('ankleL').add(r.worldOf('ankleR')).multiplyScalar(0.5);
       lever.position.copy(a).add(new THREE.Vector3(0, 0.0, -0.05));
-      arm.set(new THREE.Vector3(0, 0.5, 0.2), lever.position);
+      arm.set(new THREE.Vector3(0, 0.55, 0.39), lever.position);
       stack.setLift(t, 0.28);
     },
   };

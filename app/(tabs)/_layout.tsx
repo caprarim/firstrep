@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Dumbbell, GraduationCap, PersonStanding } from 'lucide-react-native';
+import { CalendarDays, Dumbbell, GraduationCap, PersonStanding, Target } from 'lucide-react-native';
 import * as React from 'react';
 import { Icon } from '~/components/ui/icon';
 
@@ -17,13 +17,27 @@ export default function TabsLayout() {
           paddingBottom: 8,
           paddingTop: 8,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Exercises',
           tabBarIcon: ({ color, size }) => <Icon as={Dumbbell} size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="splits"
+        options={{
+          title: 'Splits',
+          tabBarIcon: ({ color, size }) => <Icon as={CalendarDays} size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="plan"
+        options={{
+          title: 'My Plan',
+          tabBarIcon: ({ color, size }) => <Icon as={Target} size={size} color={color} />,
         }}
       />
       <Tabs.Screen
